@@ -124,23 +124,6 @@ class DynamicAgent:
         except json.JSONDecodeError:
             return "Error: Failed to parse response. Please try again.", False
 
-    def get_workspace_info(self) -> Dict[str, Any]:
-        workspace_dir = self.virtual_env.base_path
-        files_and_folders = []
-        
-        try:
-            for item in os.listdir(workspace_dir):
-                item_path = os.path.join(workspace_dir, item)
-                item_type = "folder" if os.path.isdir(item_path) else "file"
-                files_and_folders.append({"name": item, "type": item_type})
-        except Exception as e:
-            self.logging_manager.log_error(f"Error listing workspace contents: {str(e)}")
-        
-        return {
-            "workspace_path": workspace_dir,
-            "contents": files_and_folders
-        }
-
     async def code_execute(self, task: str, task_context: Dict[str, Any]) -> str:
         workspace_dir = self.virtual_env.base_path
         

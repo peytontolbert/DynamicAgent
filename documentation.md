@@ -173,3 +173,49 @@ Key method:
 3. Expand supported programming languages for code execution.
 4. Implement a more advanced error recovery system.
 5. Develop a user interface for easier interaction with the agent.
+
+## Knowledge Persistence
+
+The Dynamic Agent system saves long-term knowledge primarily through interactions with the KnowledgeGraph. This occurs at specific points during task processing:
+
+1. Task Completion:
+   After each task is completed, regardless of whether it was a 'respond' or 'code_execute' action, the agent saves the task result and its evaluation score to the knowledge graph.
+
+   ```python
+   await self.knowledge_graph.add_task_result(task, result, score)
+   ```
+
+2. Successful Code Execution:
+   When code is executed successfully, the agent not only saves the task result but also establishes relationships between the task and relevant concepts in the knowledge graph.
+
+   ```python
+   task_result = await self.knowledge_graph.add_task_result(task, result['result'], score)
+   await self.knowledge_graph.add_relationships_to_concepts(task_result['id'], task)
+   ```
+
+3. Continuous Learning:
+   After successful task completion, the agent updates its knowledge through the continuous learning process.
+
+   ```python
+   await self.continuous_learner.learn({"content": task}, {"result": result['result']})
+   ```
+
+### Knowledge Graph Structure
+
+The knowledge graph stores various types of information:
+
+1. Task Results: Includes the original task, the result, and an evaluation score.
+2. Concepts: Extracted from tasks and linked to relevant task results.
+3. Relationships: Connections between tasks and concepts, allowing for complex querying and knowledge retrieval.
+
+### Continuous Learning
+
+The continuous learning process analyzes completed tasks and their results to update the agent's knowledge base. This may involve:
+
+1. Updating existing knowledge with new information.
+2. Creating new connections between concepts.
+3. Adjusting the agent's decision-making process based on successful task completions.
+
+### Knowledge Retrieval
+
+When processing new tasks, the agent retrieves relevant knowledge from the graph:
