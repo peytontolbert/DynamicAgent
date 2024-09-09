@@ -6,6 +6,7 @@ import json
 import re
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import uuid
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 file_handler = logging.FileHandler('errors.log')
@@ -24,26 +25,67 @@ class ContinuousLearner:
 
     async def learn(self, task: Dict[str, Any], result: Dict[str, Any]):
         extracted_knowledge = await self._extract_knowledge(task, result)
-        novelty_score = self._calculate_novelty(extracted_knowledge)
+        novelty_score = await self._calculate_novelty(extracted_knowledge)
         
         if novelty_score > self.novelty_threshold:
-            self.learning_rate *= 1.1  # Increase learning rate for novel information
-        else:
-            self.learning_rate *= 0.9  # Decrease learning rate for familiar information
+            await self._update_knowledge_graph(extracted_knowledge)
+            await self._generate_new_connections(extracted_knowledge)
         
-        self.learning_rate = max(0.01, min(1.0, self.learning_rate))  # Keep learning rate between 0.01 and 1.0
+        await self._update_task_success_rate(task, result)
         
-        await self._update_knowledge_graph(extracted_knowledge)
+        if self._should_optimize_model():
+            await self._optimize_llm_model()
 
-        # Recommend collaboration if the task is new or unfamiliar
-        if novelty_score > self.novelty_threshold:
-            await self._recommend_collaboration(task)
+    async def _generate_new_connections(self, new_knowledge: List[Dict[str, Any]]):
+        existing_knowledge = await self.knowledge_graph.get_all_knowledge()
+        prompt = f"""
+        Analyze the new knowledge and existing knowledge to identify potential new connections or insights:
+        New Knowledge: {json.dumps(new_knowledge, indent=2)}
+        Existing Knowledge: {json.dumps(existing_knowledge, indent=2)}
+        
+        Provide your analysis as a JSON array of objects, where each object has 'source', 'target', and 'relationship' keys.
+        """
+        connections = await self.llm.chat_with_ollama("You are an expert in knowledge synthesis and connection identification.", prompt)
+        parsed_connections = json.loads(connections)
+        for connection in parsed_connections:
+            await self.knowledge_graph.add_relationship(connection['source'], connection['target'], connection['relationship'])
 
-    def _calculate_novelty(self, knowledge: List[Dict[str, Any]]) -> float:
-        # Implement novelty calculation logic
-        # This is a placeholder implementation
-        return sum(len(item['value']) for item in knowledge) / 1000
+    async def _update_task_success_rate(self, task: Dict[str, Any], result: Dict[str, Any]):
+        # Implement logic to track and update task success rates
+        pass
 
+    async def _should_optimize_model(self) -> bool:
+        # Implement logic to decide when to optimize the LLM model
+        pass
+
+    async def _optimize_llm_model(self):
+        # Implement logic to fine-tune or optimize the LLM model based on accumulated data
+        pass
+
+    async def _calculate_novelty(self, knowledge: List[Dict[str, Any]]) -> float:
+        knowledge_str = json.dumps(knowledge, indent=2)
+        prompt = f"""
+        Analyze the following extracted knowledge and rate its novelty on a scale from 0 to 1,
+        where 0 is completely familiar and 1 is entirely new and groundbreaking:
+
+        {knowledge_str}
+
+        Consider factors such as:
+        1. Uniqueness of concepts
+        2. Unexpected connections between ideas
+        3. Potential for new applications or insights
+
+        Provide your response as a single float value between 0 and 1.
+        """
+        
+        novelty_score = await self.llm.chat_with_ollama("You are an AI expert in assessing the novelty of information.", prompt)
+        
+        try:
+            novelty = float(novelty_score.strip())
+            return max(0.0, min(1.0, novelty))  # Ensure the score is between 0 and 1
+        except ValueError:
+            logger.error(f"Failed to parse novelty score: {novelty_score}")
+            return 0.5  # Return a default mid-range score if parsing fails
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10),
            retry=retry_if_exception_type(ValueError))
     async def _extract_knowledge(self, task: Dict[str, Any], result: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -224,4 +266,35 @@ class ContinuousLearner:
         except json.JSONDecodeError:
             logger.warning("Failed to parse JSON response for collaboration recommendation.")
             logger.error(f"JSON parsing error: {collaboration_response}", exc_info=True)
+
+    async def apply_learned_skill(self, task):
+        relevant_skills = await self.knowledge_graph.get_relevant_skills(task)
+        if relevant_skills:
+            skill_prompt = f"""
+            Task: {task}
+            
+            Relevant skills:
+            {json.dumps(relevant_skills, indent=2)}
+            
+            Apply the most appropriate skill to complete the task.
+            Provide the steps to execute the skill as a list of actions.
+            """
+            skill_application = await self.llm.chat_with_ollama("You are an expert in applying learned skills.", skill_prompt)
+            return skill_application
+        return None
+
+    async def learn_new_skill(self, task, steps):
+        skill_name = await self.generate_skill_name(task)
+        new_skill = {
+            "name": skill_name,
+            "steps": steps,
+            "created_at": datetime.now().isoformat()
+        }
+        await self.knowledge_graph.add_skill(new_skill)
+        return new_skill
+
+    async def generate_skill_name(self, task):
+        name_prompt = f"Generate a short, descriptive name for a skill that accomplishes the following task: {task}"
+        skill_name = await self.llm.chat_with_ollama("You are an expert in naming and categorizing skills.", name_prompt)
+        return skill_name.strip()
 

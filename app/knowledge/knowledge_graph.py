@@ -142,15 +142,18 @@ class KnowledgeGraph:
         result = await self.execute_query(query)
         return [record['n'] for record in result]
 
-    async def add_task_result(self, task: str, result: str):
+    async def add_task_result(self, task: str, result: str, score: float):
         task_node = {
             "id": str(uuid.uuid4()),
             "content": task,
             "result": result,
+            "score": score,
             "timestamp": time.time()
         }
         await self.add_or_update_node("TaskResult", task_node)
-        logger.info(f"Added task result for task: {task[:100]}...")
+        logger.info(f"Added task result for task: {task[:100]}... with score: {score}")
+        # Add relationships between task and related concepts
+        await self.add_relationships_to_concepts(task_node['id'], task)
 
     async def add_improvement_suggestion(self, improvement: str):
         improvement_id = str(uuid.uuid4())
@@ -248,8 +251,9 @@ class KnowledgeGraph:
     async def get_relevant_knowledge(self, content: str) -> List[Dict[str, Any]]:
         query = """
         MATCH (n)
-        WHERE n.content CONTAINS $content
+        WHERE n.content CONTAINS $content OR n.name CONTAINS $content
         RETURN n
+        LIMIT 5
         """
         result = await self.execute_query(query, {"content": content})
         return [record['n'] for record in result]
@@ -262,3 +266,17 @@ class KnowledgeGraph:
         }
         await self.add_or_update_node("CompressedKnowledge", compressed_node)
         logger.info(f"Stored compressed knowledge: {compressed_knowledge[:100]}...")
+
+    async def add_relationships_to_concepts(self, task_id: str, task_content: str):
+        concepts = await self.extract_concepts(task_content)
+        for concept in concepts:
+            query = """
+            MATCH (t:TaskResult {id: $task_id})
+            MERGE (c:Concept {name: $concept})
+            CREATE (t)-[:RELATES_TO]->(c)
+            """
+            await self.execute_query(query, {"task_id": task_id, "concept": concept})
+
+    async def extract_concepts(self, content: str) -> List[str]:
+        # This is a placeholder implementation. You might want to use NLP techniques here.
+        return [word.strip() for word in content.split() if len(word.strip()) > 3]
