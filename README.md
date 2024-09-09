@@ -45,7 +45,7 @@ Dynamic Agent is an intelligent, adaptive system designed to process tasks using
 
 ### Code Execution
 - Supports Python, JavaScript, and Bash execution.
-- Uses a virtual environment for safe execution.
+- Uses a 'virtual_env' directory for working directory.
 - Monitors execution progress and provides real-time status updates.
 
 ### Knowledge Graph
@@ -86,12 +86,13 @@ Dynamic Agent is an intelligent, adaptive system designed to process tasks using
 Once the Dynamic Agent is running, you can interact with it by entering tasks. The agent will automatically determine whether to provide a response or execute code based on the task.
 
 Example tasks:
-- "What is the capital of France?" (Response)
-- "Calculate the factorial of 5" (Code Execution)
-- "Create a list of prime numbers up to 100" (Code Execution)
-- "Explain the concept of recursion" (Response)
+- "What is the capital of France?"
+- "Calculate the factorial of 5"
+- "Create a list of prime numbers up to 100"
+- "Copy D:/testproject and document the codebase" 
+- "Who is the current President of the United States? Use google search to find the answer."
 
-The agent will guide you through the process, asking for additional information if needed and confirming when the task is complete.
+The agent will go through the process, asking for additional information if needed and asking for confirmation when the task is complete.
 
 To exit the program, simply type 'exit'.
 
@@ -119,12 +120,7 @@ Contributions to the Dynamic Agent project are welcome. Please ensure to follow 
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## License
+## Acknowledgements
 
-This project is licensed under the MIT License - see the `LICENSE` file for details.
-
-## Acknowledgments
-
-- OpenAI for the GPT model used in natural language processing
+- Ollama for the GPT model used in natural language processing
 - Neo4j for the graph database used in knowledge management
-- All contributors who have helped to improve and expand this project

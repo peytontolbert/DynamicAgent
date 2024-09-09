@@ -6,7 +6,6 @@ from app.chat_with_ollama import ChatGPT
 from app.execution.code_execution_manager import CodeExecutionManager
 from app.knowledge.knowledge_graph import KnowledgeGraph
 from app.virtual_env.virtual_environment import VirtualEnvironment
-from app.learning.continuous_learner import ContinuousLearner
 from app.logging.logging_manager import LoggingManager
 from app.utils.code_utils import format_code
 from app.agent.context_manager import ContextManager
@@ -16,15 +15,13 @@ class DynamicAgent:
     def __init__(self, uri, user, password, base_path):
         self.llm = ChatGPT()
         self.code_execution_manager = CodeExecutionManager(self.llm)
-        self.knowledge_graph = KnowledgeGraph(uri, user, password)
+        self.logging_manager = LoggingManager()  # Initialize logging manager first
+        self.knowledge_graph = KnowledgeGraph(uri, user, password, self.llm)  # Pass LLM to KnowledgeGraph
         self.virtual_env = VirtualEnvironment(base_path)
         self.env_id = None
         self.has_memory = False
-        self.task_history = []
-        self.continuous_learner = ContinuousLearner(self.knowledge_graph, self.llm)
-        self.logging_manager = LoggingManager()
-        self.context_manager = ContextManager()
-        self.reward_model = RewardModel(self.llm)
+        self.context_manager = ContextManager(self.knowledge_graph)
+        self.reward_model = RewardModel(self.llm, self.knowledge_graph)
 
     async def setup(self):
         if not os.path.exists(self.virtual_env.base_path):
@@ -51,7 +48,7 @@ class DynamicAgent:
         self.logging_manager.log_info(welcome_message)
 
     async def process_task(self, task: str):
-        task_context = {"original_task": task, "steps": []}
+        task_context = await self.context_manager.create_task_context(task)  # Use ContextManager to create task context
         while True:
             decision = await self.decide_action(task, task_context)
             action = decision["action"]
@@ -70,7 +67,7 @@ class DynamicAgent:
                 })
                 if is_complete:
                     break
-                task = input("User: ")
+                task += "\n" + input("User: ")
             elif action == "code_execute":
                 result = await self.code_execute(task, task_context)
                 task_context["steps"].append({
@@ -85,14 +82,61 @@ class DynamicAgent:
                 result = f"Error: Unknown action '{action}'. The agent can only 'respond' or 'code_execute'."
                 print(result)
 
+            # Update working memory with task context
+            await self.context_manager.update_working_memory(f"task_context_{task}", task_context)
+            await self.context_manager.update_working_memory("latest_result", result)
+
         # Evaluate the task using the reward model
         score = await self.reward_model.evaluate_task(task, task_context, result)
         self.logging_manager.log_info(f"Task evaluation score: {score}")
 
-        # Update the knowledge graph with the task result and score
-        await self.knowledge_graph.add_task_result(task, result, score)
+        # Update the context manager with the task result and score
+        await self.context_manager.add_task(task, action, result, score)
+
+        # Store the episode in episodic memory
+        await self.knowledge_graph.store_episode(task_context)
+
+        # Reflect on the task
+        await self.reflect_on_task(task, task_context, result)
+
+        # Trigger memory consolidation
+        await self.consolidate_memory()
+
+        # Get learning insights
+        learning_insights = await self.reward_model.get_learning_insights()
+        self.logging_manager.log_info(f"Learning insights: {json.dumps(learning_insights, indent=2)}")
+
+        # Periodic memory consolidation
+        await self.periodic_memory_consolidation()
+
+        # Generate and store meta-learning insights
+        await self.generate_meta_learning_insights()
+
+        # Update knowledge with learned patterns
+        await self.reward_model.update_knowledge_with_patterns()
 
         return "Task completed."
+
+    async def decide_action(self, task: str, task_context: Dict[str, Any]) -> Dict[str, Any]:
+        contextual_knowledge = await self.context_manager.get_contextual_knowledge(task, task_context)
+        
+        prompt = f"""
+        Task: {task}
+        Recent Context: {contextual_knowledge['recent_context']}
+        Relevant Knowledge: {json.dumps(contextual_knowledge['relevant_knowledge'], indent=2)}
+        Relevant Past Episodes: {json.dumps(contextual_knowledge['relevant_episodes'], indent=2)}
+        Working Memory: {json.dumps(self.context_manager.working_memory, indent=2)}
+        
+        Decide the best action to take: 'respond' or 'code_execute'.
+        Provide your decision as a JSON object with the following structure:
+        {{
+            "action": string,
+            "confidence": float,
+            "reasoning": string
+        }}
+        """
+        decision = await self.llm.chat_with_ollama("You are an expert in task analysis and decision making.", prompt)
+        return json.loads(decision)
 
     async def respond(self, task: str, task_context: Dict[str, Any]) -> str:
         relevant_knowledge = await self.knowledge_graph.get_relevant_knowledge(task)
@@ -142,20 +186,58 @@ class DynamicAgent:
         try:
             result = await self.code_execution_manager.execute_and_monitor(formatted_code, self.execution_callback, language, cwd=workspace_dir)
             if result['status'] == 'success':
+                # Record tool usage
+                await self.context_manager.add_tool_usage("code_execution", {
+                    "task": task,
+                    "language": language,
+                    "thoughts": thoughts
+                }, {
+                    "result": result['result'],
+                    "status": result['status']
+                })
+
                 # Evaluate the task using the reward model
                 score = await self.reward_model.evaluate_task(task, task_context, result['result'])
                 self.logging_manager.log_info(f"Task evaluation score: {score}")
 
+                # Evaluate tool usage
+                tool_score = await self.reward_model.evaluate_tool_usage("code_execution", {
+                    "task": task,
+                    "language": language,
+                    "thoughts": thoughts
+                }, {
+                    "result": result['result'],
+                    "status": result['status']
+                })
+                self.logging_manager.log_info(f"Tool usage evaluation score: {tool_score}")
+
                 # Update the knowledge graph with the task result and score
                 task_result = await self.knowledge_graph.add_task_result(task, result['result'], score)
                 await self.knowledge_graph.add_relationships_to_concepts(task_result['id'], task)
-                await self.continuous_learner.learn({"content": task}, {"result": result['result']})
                 return f"Thoughts: {thoughts}\n\nResult: {result['result']}\n\nTask completed successfully."
             else:
                 error_analysis = await self.handle_error(result['error'], formatted_code)
+                # Record failed tool usage
+                await self.context_manager.add_tool_usage("code_execution", {
+                    "task": task,
+                    "language": language,
+                    "thoughts": thoughts
+                }, {
+                    "error": result['error'],
+                    "status": result['status']
+                })
                 return f"Thoughts: {thoughts}\n\nError: {result['error']}\n\nSuggested Fix: {error_analysis}"
         except Exception as e:
             error_analysis = await self.handle_error(str(e), formatted_code)
+            # Record exception in tool usage
+            await self.context_manager.add_tool_usage("code_execution", {
+                "task": task,
+                "language": language,
+                "thoughts": thoughts
+            }, {
+                "exception": str(e),
+                "status": "exception"
+            })
             return f"Unexpected error: {str(e)}\n\nSuggested Fix: {error_analysis}"
 
     async def generate_thoughts(self, task: str) -> str:
@@ -186,6 +268,23 @@ class DynamicAgent:
         self.context_manager.update_working_memory("last_error", {"error": error, "analysis": analysis})
         return analysis
 
+    async def reflect_on_task(self, task: str, task_context: Dict[str, Any], result: str):
+        insights = await self.reward_model._extract_insights(task, task_context, result)
+        await self.knowledge_graph.integrate_insights(insights)
+
+    async def consolidate_memory(self):
+        recent_tasks = self.context_manager.get_recent_tasks()
+        await self.knowledge_graph.consolidate_memory(recent_tasks)
+
+    async def periodic_memory_consolidation(self):
+        await self.context_manager.compress_long_term_memory()
+        await self.knowledge_graph.consolidate_knowledge()
+
+    async def generate_meta_learning_insights(self):
+        recent_tasks = await self.context_manager.get_recent_tasks(limit=10)
+        insights = await self.reward_model.generate_meta_insights(recent_tasks)
+        await self.knowledge_graph.store_meta_learning_insights(insights)
+
     async def run(self):
         await self.setup()
         while True:
@@ -195,6 +294,11 @@ class DynamicAgent:
             result = await self.process_task(task)
             self.logging_manager.log_info(f"Task result: {result}")
             print(result)  # Display the result to the user
+            
+            # Get latest meta-learning insights from the knowledge graph
+            latest_insights = await self.knowledge_graph.get_latest_meta_learning_insights()
+            self.logging_manager.log_info(f"Latest meta-learning insights: {json.dumps(latest_insights, indent=2)}")
+        
         await self.cleanup()
 
     async def cleanup(self):
