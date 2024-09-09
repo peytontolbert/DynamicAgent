@@ -1,81 +1,85 @@
 # Dynamic Agent
 
-Dynamic Agent is an intelligent, adaptive system designed to process tasks using two primary tools: Respond and Code Execute. It leverages a sophisticated knowledge system and decision-making workflow to accomplish a wide range of tasks.
+Dynamic Agent is an intelligent, adaptive system designed to process tasks using two primary tools: Respond and Code Execute. It leverages a sophisticated knowledge graph and decision-making workflow to accomplish a wide range of tasks, with the ability to confirm task completion directly with the user.
 
 ## Features
 
-- **Dual-Tool System**: Utilizes 'Respond' for information retrieval and 'Code Execute' for task execution.
+- **Dual-Tool System**: Utilizes 'Respond' for information retrieval, clarification, and task completion confirmation, and 'Code Execute' for task execution.
 - **Knowledge-Driven Decision Making**: Uses a robust knowledge graph to inform tool selection and task execution.
-- **Continuous Learning**: Improves its knowledge and capabilities over time through task results.
-- **Adaptive Code Execution**: Generates and executes Python or JavaScript code to perform complex tasks.
+- **Continuous Learning**: Improves its knowledge and capabilities over time through task results and user feedback.
+- **Adaptive Code Execution**: Generates and executes Python, JavaScript, or Bash code to perform complex tasks.
 - **Virtual Environment Management**: Creates isolated environments for safe code execution.
 - **Performance Monitoring**: Tracks and logs the performance of various operations.
+- **User-Driven Task Completion**: Confirms task completion directly with the user, ensuring satisfaction with the results.
+- **Error Analysis and Recovery**: Analyzes execution errors and suggests fixes or next steps.
 
 ## Components
 
-1. **ChatGPT**: Handles natural language processing and generation.
-2. **CodeExecutionManager**: Manages the execution of generated code.
-3. **KnowledgeGraph**: Stores and retrieves relevant knowledge for tasks.
-4. **VirtualEnvironment**: Creates isolated environments for code execution.
+1. **ChatGPT (LLM)**: Handles natural language processing and generation.
+2. **CodeExecutionManager**: Manages the generation and execution of code in multiple languages.
+3. **KnowledgeGraph**: Stores and retrieves relevant knowledge for tasks using Neo4j.
+4. **VirtualEnvironment**: Creates isolated environments for safe code execution.
 5. **ContinuousLearner**: Improves the system's knowledge over time.
 6. **LoggingManager**: Handles logging of system operations.
-7. **PerformanceMonitor**: Tracks the performance of various system components.
+7. **ContextManager**: Manages task history and working memory.
+8. **RewardModel**: Evaluates task performance and provides feedback for learning.
 
 ## Workflow
 
 1. The user inputs a task.
-2. The system analyzes the task and relevant knowledge to decide whether to use 'Respond' or 'Code Execute'.
-3. If 'Respond' is chosen, the user provides information or asks for clarification.
-4. If 'Code Execute' is chosen, the system generates and executes code to accomplish the task.
-5. The system learns from the task result and updates its knowledge graph.
-6. Steps 3-5 repeat until the task is fully accomplished.
+2. The system analyzes the task, relevant knowledge, and context to decide whether to use 'Respond' or 'Code Execute'.
+3. If 'Respond' is chosen:
+   a. The system formulates a question or request for more information.
+   b. The user provides the requested information.
+   c. The system may ask follow-up questions or confirm task completion.
+4. If 'Code Execute' is chosen:
+   a. The system generates thoughts on how to approach the task.
+   b. Code is generated in the appropriate language (Python, JavaScript, or Bash).
+   c. The code is executed in a virtual environment.
+   d. The system presents the results to the user.
+5. The system asks the user to confirm if the task is complete.
+6. The system learns from the task result, user feedback, and updates its knowledge graph.
+7. Steps 2-6 repeat until the user confirms the task is fully accomplished.
 
-## Future Enhancements
+## Key Features in Detail
 
-1. **Enhanced Knowledge Retrieval**: Implement more sophisticated algorithms for retrieving relevant knowledge, potentially using embeddings or semantic search to improve the accuracy of the 'respond' action.
+### Code Execution
+- Supports Python, JavaScript, and Bash execution.
+- Uses a virtual environment for safe execution.
+- Monitors execution progress and provides real-time status updates.
 
-2. **Contextual Task Understanding**: Develop a system that can better understand the context of user tasks, including previous interactions and user preferences, to improve decision-making between 'respond' and 'code_execute' actions.
+### Knowledge Graph
+- Uses Neo4j for storing and retrieving knowledge.
+- Supports adding task results, improvement suggestions, and tool usage information.
+- Allows for complex querying and relationship management.
 
-3. **Multi-Step Task Planning**: Implement a planning system that can break down complex tasks into a series of 'respond' and 'code_execute' actions, allowing the agent to handle more sophisticated user requests.
+### Continuous Learning
+- Evaluates task performance using a reward model.
+- Updates the knowledge graph based on task results and user feedback.
+- Adapts decision-making based on past experiences.
 
-4. **Improved Error Handling and Recovery**: Enhance the system's ability to analyze errors during code execution, suggest fixes, and automatically retry failed operations, reducing the need for user intervention.
-
-5. **Dynamic Code Optimization**: Develop techniques to optimize generated code based on past executions and performance metrics, improving the efficiency of the 'code_execute' action over time.
-
-6. **Knowledge Synthesis**: Create methods to synthesize new knowledge from existing information and execution results, enhancing the agent's ability to respond to novel situations.
-
-7. **Interactive Clarification**: Implement a system for the agent to ask clarifying questions when task requirements are ambiguous, improving the accuracy of both 'respond' and 'code_execute' actions.
-
-8. **Automated Knowledge Graph Maintenance**: Develop algorithms to periodically prune, consolidate, and optimize the knowledge graph structure for improved performance and relevance.
-
-9. **Task Dependency Management**: Implement a system to manage dependencies between tasks and subtasks, allowing the agent to handle more complex, multi-stage operations efficiently.
-
-10. **Adaptive Learning Rate**: Develop a mechanism to adjust the agent's learning rate based on the novelty and complexity of tasks, optimizing the balance between stability and adaptability.
-
-11. **Enhanced Security Measures**: Implement robust security protocols for code execution, ensuring that the 'code_execute' action cannot be exploited or cause unintended system changes.
-
-12. **Natural Language Code Generation**: Improve the agent's ability to generate code from natural language descriptions, enhancing the 'code_execute' action's versatility.
-
-13. **Performance Analytics**: Develop a comprehensive analytics system to track the agent's performance over time, providing insights for future improvements and optimizations.
-
-14. **Cross-Domain Knowledge Application**: Enhance the agent's ability to apply knowledge from one domain to solve problems in another, increasing its problem-solving capabilities.
-
-15. **User Feedback Integration**: Create a system to incorporate user feedback on the agent's responses and code executions, allowing for continuous improvement based on user satisfaction.
+### Error Handling
+- Analyzes execution errors and provides suggested fixes.
+- Supports code adaptation based on error analysis.
 
 ## Setup
 
 1. Clone the repository.
-2. Install the required dependencies (list them in a `requirements.txt` file).
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 3. Set up a Neo4j database and configure the connection details in a `.env` file:
-
-NEO4J_URI=<your-neo4j-uri>
-NEO4J_USER=<your-neo4j-username>
-NEO4J_PASSWORD=<your-neo4j-password>
-VIRTUAL_ENV_BASE_PATH=./virtual_env
-
+   ```
+   NEO4J_URI=<your-neo4j-uri>
+   NEO4J_USER=<your-neo4j-username>
+   NEO4J_PASSWORD=<your-neo4j-password>
+   VIRTUAL_ENV_BASE_PATH=./virtual_env
+   ```
 4. Run the main script:
-
-python main.py
+   ```
+   python main.py
+   ```
 
 ## Usage
 
@@ -85,9 +89,42 @@ Example tasks:
 - "What is the capital of France?" (Response)
 - "Calculate the factorial of 5" (Code Execution)
 - "Create a list of prime numbers up to 100" (Code Execution)
+- "Explain the concept of recursion" (Response)
+
+The agent will guide you through the process, asking for additional information if needed and confirming when the task is complete.
 
 To exit the program, simply type 'exit'.
+
+## Advanced Features
+
+### Knowledge Import/Export
+The system supports importing and exporting knowledge, allowing for:
+- Bootstrapping the agent with initial knowledge
+- Sharing knowledge between different instances of the agent
+- Backing up and restoring the agent's knowledge base
+
+### Performance Analytics
+The system tracks various performance metrics, which can be used to:
+- Identify areas for improvement
+- Optimize decision-making processes
+- Track the agent's learning progress over time
 
 ## Contributing
 
 Contributions to the Dynamic Agent project are welcome. Please ensure to follow the coding standards and submit pull requests for any new features or bug fixes.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the `LICENSE` file for details.
+
+## Acknowledgments
+
+- OpenAI for the GPT model used in natural language processing
+- Neo4j for the graph database used in knowledge management
+- All contributors who have helped to improve and expand this project

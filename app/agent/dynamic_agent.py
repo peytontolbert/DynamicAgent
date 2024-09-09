@@ -8,8 +8,7 @@ from app.knowledge.knowledge_graph import KnowledgeGraph
 from app.virtual_env.virtual_environment import VirtualEnvironment
 from app.learning.continuous_learner import ContinuousLearner
 from app.logging.logging_manager import LoggingManager
-from app.agents.skill import RespondSkill, CodeExecuteSkill
-from app.utils.code_utils import extract_code_and_language, format_code
+from app.utils.code_utils import format_code
 from app.agent.context_manager import ContextManager
 from app.learning.reward_model import RewardModel
 
@@ -23,8 +22,6 @@ class DynamicAgent:
         self.has_memory = False
         self.task_history = []
         self.continuous_learner = ContinuousLearner(self.knowledge_graph, self.llm)
-        self.respond_skill = RespondSkill("Respond", "Handles natural language responses", self.llm)
-        self.code_execute_skill = CodeExecuteSkill("CodeExecute", "Executes code tasks", self.llm, self.code_execution_manager)
         self.logging_manager = LoggingManager()
         self.context_manager = ContextManager()
         self.reward_model = RewardModel(self.llm)
@@ -65,12 +62,14 @@ class DynamicAgent:
             self.logging_manager.log_info(f"Reasoning: {reasoning}")
             
             if action == "respond":
-                result = await self.respond(task, task_context)
+                result, is_complete = await self.respond(task, task_context)
                 print(result)
                 task_context["steps"].append({
                     "action": "respond",
                     "result": result
                 })
+                if is_complete:
+                    break
                 task = input("User: ")
             elif action == "code_execute":
                 result = await self.code_execute(task, task_context)
@@ -86,9 +85,6 @@ class DynamicAgent:
                 result = f"Error: Unknown action '{action}'. The agent can only 'respond' or 'code_execute'."
                 print(result)
 
-            if await self.is_task_complete(task, task_context):
-                break
-
         # Evaluate the task using the reward model
         score = await self.reward_model.evaluate_task(task, task_context, result)
         self.logging_manager.log_info(f"Task evaluation score: {score}")
@@ -98,72 +94,14 @@ class DynamicAgent:
 
         return "Task completed."
 
-    async def decide_action(self, task: str, task_context: Dict[str, Any]) -> str:
-        relevant_knowledge = await self.knowledge_graph.get_relevant_knowledge(task)
-        recent_context = self.context_manager.get_recent_context()
-        task_history = self.context_manager.get_task_history()
-        system_performance = await self.knowledge_graph.get_system_performance()
-        tool_usage_history = await self.knowledge_graph.get_tool_usage_history("respond", limit=5)
-        tool_usage_history += await self.knowledge_graph.get_tool_usage_history("code_execute", limit=5)
-
-        prompt = f"""
-        Analyze the following task and decide whether to use the 'respond' or 'code_execute' action:
-        Task: {task}
-        
-        Recent Context:
-        {recent_context}
-        
-        Task History:
-        {json.dumps(task_history, indent=2)}
-        
-        Relevant Knowledge:
-        {json.dumps(relevant_knowledge, indent=2)}
-        
-        System Performance:
-        {json.dumps(system_performance, indent=2)}
-        
-        Tool Usage History:
-        {json.dumps(tool_usage_history, indent=2)}
-        
-        Task Context:
-        {json.dumps(task_context, indent=2)}
-        
-        Consider the following:
-        1. If the task requires user knowledge, clarification, or knowledge outside of previous context, use 'respond'.
-        2. If the task involves data manipulation, computation, system interaction, or requires generating/executing code, use 'code_execute'.
-        3. Analyze the task history and tool usage history to identify patterns and preferences.
-        4. Consider the system performance metrics when deciding which action might be more efficient.
-        5. You must choose either 'respond' or 'code_execute'. There are no other options.
-        
-        Provide your decision as a JSON object with the following structure:
-        {{
-            "action": "respond" or "code_execute",
-            "confidence": <float between 0 and 1>,
-            "reasoning": "<brief explanation of your decision>"
-        }}
-        """
-        decision = await self.llm.chat_with_ollama("You are a task analysis expert with deep understanding of system context and performance.", prompt)
-        
-        try:
-            decision_obj = json.loads(decision)
-            self.logging_manager.log_info(f"Action decision: {decision_obj}")
-            return decision_obj
-        except json.JSONDecodeError:
-            self.logging_manager.log_error(f"Failed to parse decision JSON: {decision}")
-            return {"action": "respond", "confidence": 0.5, "reasoning": "Default to respond if parsing fails"}
-
     async def respond(self, task: str, task_context: Dict[str, Any]) -> str:
         relevant_knowledge = await self.knowledge_graph.get_relevant_knowledge(task)
-        workspace_info = self.get_workspace_info()
         
         prompt = f"""
         Task: {task}
         
         Relevant Knowledge:
         {json.dumps(relevant_knowledge, indent=2)}
-        
-        Workspace Info:
-        {json.dumps(workspace_info, indent=2)}
         
         Task Context:
         {json.dumps(task_context, indent=2)}
@@ -182,9 +120,9 @@ class DynamicAgent:
         try:
             decision = json.loads(response)
             user_input = input(decision["question"] + " ")
-            return f"User input: {user_input}\nReasoning: {decision['reasoning']}"
+            return f"User input: {user_input}\nReasoning: {decision['reasoning']}", False
         except json.JSONDecodeError:
-            return "Error: Failed to parse response. Please try again."
+            return "Error: Failed to parse response. Please try again.", False
 
     def get_workspace_info(self) -> Dict[str, Any]:
         workspace_dir = self.virtual_env.base_path
@@ -206,7 +144,8 @@ class DynamicAgent:
     async def code_execute(self, task: str, task_context: Dict[str, Any]) -> str:
         workspace_dir = self.virtual_env.base_path
         
-        thoughts = await self.generate_thoughts(task, workspace_dir)
+        # Generate thoughts and code to execute
+        thoughts = await self.generate_thoughts(task)
         code, language = await self.code_execution_manager.generate_code(task, workspace_dir, thoughts)
         
         if not code:
@@ -218,7 +157,7 @@ class DynamicAgent:
         self.logging_manager.log_info(f"Formatted code:\n{formatted_code}")
 
         try:
-            result = await self.code_execution_manager.execute_and_monitor(formatted_code, self.execution_callback, language)
+            result = await self.code_execution_manager.execute_and_monitor(formatted_code, self.execution_callback, language, cwd=workspace_dir)
             if result['status'] == 'success':
                 # Evaluate the task using the reward model
                 score = await self.reward_model.evaluate_task(task, task_context, result['result'])
@@ -236,16 +175,15 @@ class DynamicAgent:
             error_analysis = await self.handle_error(str(e), formatted_code)
             return f"Unexpected error: {str(e)}\n\nSuggested Fix: {error_analysis}"
 
-    async def generate_thoughts(self, task: str, workspace_dir: str) -> str:
+    async def generate_thoughts(self, task: str) -> str:
         thoughts_prompt = f"""
         Analyze the following task and provide your thoughts on how to approach it:
         Task: {task}
-        Workspace directory: {workspace_dir}
         
         Provide your thoughts in the following format:
         Thoughts: <Your analysis and approach>
         """
-        thoughts_response = await self.llm.chat_with_ollama("You are an expert Python programmer and task analyzer.", thoughts_prompt)
+        thoughts_response = await self.llm.chat_with_ollama("You are an expert Python|Javascript|Bash programmer and task analyzer.", thoughts_prompt)
         return thoughts_response.split("Thoughts:")[1].strip() if "Thoughts:" in thoughts_response else ""
 
 
@@ -265,24 +203,6 @@ class DynamicAgent:
         self.context_manager.update_working_memory("last_error", {"error": error, "analysis": analysis})
         return analysis
 
-    async def is_task_complete(self, task: str, task_context: Dict[str, Any]) -> bool:
-        prompt = f"""
-        Analyze the following task and determine if it is complete:
-        Task: {task}
-        
-        Task Context:
-        {json.dumps(task_context, indent=2)}
-        
-        Consider the following:
-        1. If the task is complete, return True.
-        2. If the task is not complete, return False.
-        
-        Provide your decision as a single word: either 'True' or 'False'.
-        """
-        decision = await self.llm.chat_with_ollama("You are a task analysis expert.", prompt)
-        decision = decision.strip().lower()
-        return decision == "true"
-
     async def run(self):
         await self.setup()
         while True:
@@ -297,3 +217,24 @@ class DynamicAgent:
     async def cleanup(self):
         if self.env_id and self.env_id != self.virtual_env.base_path:
             await self.virtual_env.destroy_environment(self.env_id)
+
+    async def export_agent_knowledge(self, file_path: str):
+        """Export the agent's knowledge to a file."""
+        await self.knowledge_graph.export_knowledge(file_path)
+
+    async def import_agent_knowledge(self, file_path: str):
+        """Import knowledge from a file into the agent."""
+        await self.knowledge_graph.import_knowledge(file_path)
+
+    async def export_knowledge_framework(self, file_path: str):
+        """Export the agent's knowledge framework to a file."""
+        await self.knowledge_graph.export_advanced_knowledge_framework(file_path)
+
+    async def import_knowledge_framework(self, file_path: str):
+        """Import a knowledge framework from a file into the agent."""
+        await self.knowledge_graph.import_advanced_knowledge_framework(file_path)
+
+    async def bootstrap_agent(self, framework_file: str, knowledge_file: str):
+        """Bootstrap the agent with a knowledge framework and initial knowledge."""
+        await self.knowledge_graph.bootstrap_agent(framework_file, knowledge_file)
+        self.logging_manager.log_info("Agent bootstrapped with advanced knowledge framework and initial knowledge")
