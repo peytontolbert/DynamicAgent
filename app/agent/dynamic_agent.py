@@ -9,18 +9,20 @@ from app.virtual_env.virtual_environment import VirtualEnvironment
 from app.logging.logging_manager import LoggingManager
 from app.utils.code_utils import format_code
 from app.agent.context_manager import ContextManager
+from app.entropy.entropy_manager import EntropyManager
 from app.learning.reward_model import RewardModel
 
 class DynamicAgent:
     def __init__(self, uri, user, password, base_path):
         self.llm = ChatGPT()
-        self.code_execution_manager = CodeExecutionManager(self.llm)
         self.logging_manager = LoggingManager()  # Initialize logging manager first
+        self.code_execution_manager = CodeExecutionManager(self.llm, self.logging_manager)
         self.knowledge_graph = KnowledgeGraph(uri, user, password, self.llm)  # Pass LLM to KnowledgeGraph
         self.virtual_env = VirtualEnvironment(base_path)
         self.env_id = None
+        self.entropy_manager = EntropyManager(self.llm)
         self.has_memory = False
-        self.context_manager = ContextManager(self.knowledge_graph)
+        self.context_manager = ContextManager(self.knowledge_graph, self.entropy_manager)
         self.reward_model = RewardModel(self.llm, self.knowledge_graph)
 
     async def setup(self):
@@ -136,7 +138,13 @@ class DynamicAgent:
         }}
         """
         decision = await self.llm.chat_with_ollama("You are an expert in task analysis and decision making.", prompt)
-        return json.loads(decision)
+        
+        # Sanitize the response to ensure it's valid JSON
+        try:
+            return json.loads(decision)
+        except json.JSONDecodeError as e:
+            self.logging_manager.log_error(f"Failed to parse decision JSON: {str(e)}")
+            return {"action": "error", "confidence": 0.0, "reasoning": "Invalid JSON response from LLM"}
 
     async def respond(self, task: str, task_context: Dict[str, Any]) -> str:
         relevant_knowledge = await self.knowledge_graph.get_relevant_knowledge(task)
@@ -251,12 +259,11 @@ class DynamicAgent:
         thoughts_response = await self.llm.chat_with_ollama("You are an expert Python|Javascript|Bash programmer and task analyzer.", thoughts_prompt)
         return thoughts_response.split("Thoughts:")[1].strip() if "Thoughts:" in thoughts_response else ""
 
-
     async def execution_callback(self, status: Dict[str, Any]):
         self.logging_manager.log_info(f"Execution status: {status['status']}")
 
     async def handle_error(self, error: str, code: str = None):
-        error_prompt = """
+        error_prompt = f"""
         An error occurred during task execution:
         {error}
 
@@ -265,7 +272,7 @@ class DynamicAgent:
         Analyze the error and suggest a fix or next steps to resolve the issue.
         """
         analysis = await self.llm.chat_with_ollama("You are an expert programmer and error analyst.", error_prompt)
-        self.context_manager.update_working_memory("last_error", {"error": error, "analysis": analysis})
+        await self.context_manager.update_working_memory("last_error", {"error": error, "analysis": analysis})
         return analysis
 
     async def reflect_on_task(self, task: str, task_context: Dict[str, Any], result: str):

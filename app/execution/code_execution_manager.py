@@ -2,11 +2,13 @@ import asyncio
 from typing import Dict, Any, Callable
 from app.utils.code_utils import extract_code_and_language
 import os
+from app.logging.logging_manager import LoggingManager
 import subprocess
 
 class CodeExecutionManager:
-    def __init__(self, llm):
+    def __init__(self, llm, logging_manager):
         self.llm = llm
+        self.logging_manager = logging_manager  # Ensure this line is present
 
     async def generate_code(self, task: str, workspace_dir: str, thoughts: str) -> (str, str):
         code_prompt = f"""
@@ -45,7 +47,7 @@ class CodeExecutionManager:
             raise ValueError("Unsupported language")
 
         while not execution_task.done():
-            await asyncio.sleep(0.1)  # Check status every 100ms
+            await asyncio.sleep(1)  # Check status every 100ms
             await callback({"status": "running"})
 
         try:
