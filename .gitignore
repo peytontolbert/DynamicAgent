@@ -5,8 +5,8 @@ venv/
 __pycache__/
 *.pyc
 
+embedding_cache/
 virtual_env/
-workspaces/
 # Environment variables
 .env
 
