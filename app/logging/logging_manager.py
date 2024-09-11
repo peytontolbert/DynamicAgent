@@ -4,80 +4,62 @@ import time
 from typing import Dict, Any
 
 class LoggingManager:
-	_instance = None
+    def __init__(self, log_file: str = "app.log", max_size: int = 1024 * 1024, backup_count: int = 5):
+        self.logger = logging.getLogger("LLMAgentSystem")
+        self.logger.setLevel(logging.DEBUG)
 
-	def __new__(cls, *args, **kwargs):
-		if not cls._instance:
-			cls._instance = super(LoggingManager, cls).__new__(cls)
-			cls._instance._initialized = False
-		return cls._instance
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-	def __init__(self, log_file: str = "app.log", max_size: int = 1024 * 1024, backup_count: int = 5):
-		if self._initialized:
-			return
-		self._initialized = True
+        # File handler
+        file_handler = RotatingFileHandler(log_file, maxBytes=max_size, backupCount=backup_count)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
 
-		self.logger = logging.getLogger("LLMAgentSystem")
-		self.logger.setLevel(logging.DEBUG)
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
 
-		# Clear any existing handlers
-		self.logger.handlers = []
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
 
-		formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    def log_info(self, message: str):
+        self.logger.info(message)
 
-		# File handler
-		file_handler = RotatingFileHandler(log_file, maxBytes=max_size, backupCount=backup_count)
-		file_handler.setLevel(logging.DEBUG)
-		file_handler.setFormatter(formatter)
+    def log_warning(self, message: str):
+        self.logger.warning(message)
 
-		# Console handler
-		console_handler = logging.StreamHandler()
-		console_handler.setLevel(logging.INFO)
-		console_handler.setFormatter(formatter)
+    def log_error(self, message: str):
+        self.logger.error(message)
 
-		self.logger.addHandler(file_handler)
-		self.logger.addHandler(console_handler)
-
-	def log_info(self, message: str):
-		self.logger.info(message)
-
-	def log_warning(self, message: str):
-		self.logger.warning(message)
-
-	def log_error(self, message: str):
-		self.logger.error(message)
-
-	def log_debug(self, message: str):
-		self.logger.debug(message)
+    def log_debug(self, message: str):
+        self.logger.debug(message)
 
 class PerformanceMonitor:
-	def __init__(self, logging_manager: LoggingManager):
-		self.logging_manager = logging_manager
-		self.start_times: Dict[str, float] = {}
-		self.metrics: Dict[str, Dict[str, Any]] = {}
+    def __init__(self, logging_manager: LoggingManager):
+        self.logging_manager = logging_manager
+        self.start_times: Dict[str, float] = {}
+        self.metrics: Dict[str, Dict[str, Any]] = {}
 
-	def start_timer(self, operation: str):
-		self.start_times[operation] = time.time()
+    def start_timer(self, operation: str):
+        self.start_times[operation] = time.time()
 
-	def stop_timer(self, operation: str):
-		if operation in self.start_times:
-			elapsed_time = time.time() - self.start_times[operation]
-			if operation not in self.metrics:
-				self.metrics[operation] = {"count": 0, "total_time": 0, "avg_time": 0}
-			
-			self.metrics[operation]["count"] += 1
-			self.metrics[operation]["total_time"] += elapsed_time
-			self.metrics[operation]["avg_time"] = self.metrics[operation]["total_time"] / self.metrics[operation]["count"]
+    def stop_timer(self, operation: str):
+        if operation in self.start_times:
+            elapsed_time = time.time() - self.start_times[operation]
+            if operation not in self.metrics:
+                self.metrics[operation] = {"count": 0, "total_time": 0, "avg_time": 0}
+            
+            self.metrics[operation]["count"] += 1
+            self.metrics[operation]["total_time"] += elapsed_time
+            self.metrics[operation]["avg_time"] = self.metrics[operation]["total_time"] / self.metrics[operation]["count"]
 
-			self.logging_manager.log_debug(f"Operation '{operation}' took {elapsed_time:.4f} seconds")
-			del self.start_times[operation]
+            self.logging_manager.log_debug(f"Operation '{operation}' took {elapsed_time:.4f} seconds")
+            del self.start_times[operation]
 
-	def get_metrics(self) -> Dict[str, Dict[str, Any]]:
-		return self.metrics
+    def get_metrics(self) -> Dict[str, Dict[str, Any]]:
+        return self.metrics
 
-	def log_metrics(self):
-		for operation, data in self.metrics.items():
-			self.logging_manager.log_info(f"Performance metrics for '{operation}': {data}")
-
-# Create an instance of LoggingManager to be used throughout the application
-logging_manager = LoggingManager()
+    def log_metrics(self):
+        for operation, data in self.metrics.items():
+            self.logging_manager.log_info(f"Performance metrics for '{operation}': {data}")

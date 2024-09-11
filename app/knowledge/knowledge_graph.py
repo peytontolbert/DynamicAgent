@@ -1,58 +1,211 @@
-from app.knowledge.base_knowledge_graph import BaseKnowledgeGraph
-from app.knowledge.node_manager import NodeManager
-from app.knowledge.relationship_manager import RelationshipManager
-from app.knowledge.query_executor import QueryExecutor
-from app.knowledge.schema_manager import SchemaManager
-from app.knowledge.knowledge_import_export import KnowledgeImportExport
-from app.entropy.entropy_manager import EntropyManager  # Import EntropyManager
+from neo4j import GraphDatabase
+from typing import Dict, Any, List
+from app.utils.logger import StructuredLogger
+from dotenv import load_dotenv
+import asyncio
+import numpy as np
 import time
 import json
-from typing import Dict, Any, List
 import uuid
+from tenacity import retry, stop_after_attempt, wait_exponential
+from sentence_transformers import SentenceTransformer
+from app.knowledge.embedding_manager import EmbeddingManager
 
-class KnowledgeGraph(BaseKnowledgeGraph):
-    def __init__(self, uri, user, password, llm):
-        super().__init__(uri, user, password)
-        self.query_executor = QueryExecutor(self.driver)
-        self.node_manager = NodeManager(self.query_executor)
-        self.relationship_manager = RelationshipManager(self.query_executor)
-        self.schema_manager = SchemaManager(self.query_executor)
-        self.knowledge_import_export = KnowledgeImportExport(self.node_manager, self.schema_manager)
-        self.entropy_manager = EntropyManager(llm)  # Initialize EntropyManager
+load_dotenv()
 
-    async def add_or_update_node(self, label: str, properties: dict):
-        return await self.node_manager.add_or_update_node(label, properties)
+logger = StructuredLogger("KnowledgeGraph")
 
-    async def add_relationship(self, start_node_id: str, end_node_id: str, relationship_type: str, properties: dict = None):
-        await self.relationship_manager.add_relationship(start_node_id, end_node_id, relationship_type, properties)
+class KnowledgeGraph:
+    def __init__(self, uri, user, password):
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))  # Correctly initialize the driver
+        self.is_async = asyncio.iscoroutinefunction(self.driver.session)
+        self.embeddings = {}
+        self.temporal_data = {}
+        self.nodes = {}
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.embedding_manager = EmbeddingManager()
+        logger.info(f"Initialized KnowledgeGraph with {'async' if self.is_async else 'sync'} driver")
 
-    async def get_node(self, label: str, node_id: str):
-        return await self.node_manager.get_node(label, node_id)
+    def __getitem__(self, key):
+        return self.nodes.get(key)
 
-    async def get_all_nodes(self, label: str):
-        return await self.node_manager.get_all_nodes(label)
+    def __setitem__(self, key, value):
+        self.nodes[key] = value
 
-    async def add_task_result(self, task: str, result: str, score: float):
+    async def connect(self):
+        try:
+            if self.is_async:
+                await self.driver.verify_connectivity()
+            else:
+                self.driver.verify_connectivity()
+            logger.info("Successfully connected to Neo4j database")
+        except Exception as e:
+            logger.error(f"Failed to connect to Neo4j database: {str(e)}")
+            raise
+
+    async def close(self):
+        if self.driver:
+            await self.driver.close()
+            logger.info("Closed connection to Neo4j database")
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    async def execute_query(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        try:
+            if self.is_async:
+                async with self.driver.session() as session:
+                    result = await session.run(query, parameters)
+                    return await result.data()
+            else:
+                with self.driver.session() as session:
+                    result = session.run(query, parameters)
+                    return result.data()
+        except Exception as e:
+            logger.error(f"Error executing query: {str(e)}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Parameters: {parameters}")
+            raise
+
+    async def add_or_update_node(self, label: str, properties: Dict[str, Any], embedding: np.ndarray = None):
+        node_id = properties.get('id') or str(uuid.uuid4())
+        properties['id'] = node_id
+
+        # Serialize any non-primitive types
+        for key, value in properties.items():
+            if not isinstance(value, (str, int, float, bool, list)) or (isinstance(value, list) and not all(isinstance(item, (str, int, float, bool)) for item in value)):
+                properties[key] = json.dumps(value)
+
+        if embedding is None and 'summary' in properties:
+            embedding = self.embedding_manager.encode(properties['summary'])
+        
+        if embedding is not None:
+            properties['embedding'] = embedding.tolist()  # Store embedding as a list
+
+        # First, try to find an existing node with the same 'name' property
+        find_query = f"""
+        MATCH (n:{label} {{name: $name}})
+        RETURN n
+        """
+        result = await self.execute_query(find_query, {"name": properties.get('name')})
+
+        if result:
+            # If a node with the same name exists, update it
+            update_query = f"""
+            MATCH (n:{label} {{name: $name}})
+            SET n += $properties
+            RETURN n
+            """
+            await self.execute_query(update_query, {"name": properties.get('name'), "properties": properties})
+            logger.info(f"Updated existing node with name: {properties.get('name')}")
+        else:
+            # If no node with the same name exists, create a new one
+            create_query = f"""
+            CREATE (n:{label} $properties)
+            RETURN n
+            """
+            await self.execute_query(create_query, {"properties": properties})
+            logger.info(f"Created new node with ID: {node_id}")
+
+        self.nodes[node_id] = properties
+        logger.info(f"Added or updated node with ID: {node_id}")
+
+    async def add_relationship(self, start_node: Dict[str, Any], end_node: Dict[str, Any], relationship_type: str, properties: Dict[str, Any] = None):
+        start_node_id = start_node.get('id')
+        end_node_id = end_node.get('id')
+
+        if not start_node_id or not end_node_id:
+            raise ValueError("Both start_node and end_node must have an 'id' property")
+
+        relationship_id = str(uuid.uuid4())
+        properties = properties or {}
+        properties['id'] = relationship_id
+
+        query = f"""
+        MATCH (a {{id: $start_node_id}})
+        MATCH (b {{id: $end_node_id}})
+        CREATE (a)-[r:{relationship_type} $properties]->(b)
+        RETURN r
+        """
+        await self.execute_query(query, {
+            "start_node_id": start_node_id,
+            "end_node_id": end_node_id,
+            "properties": properties
+        })
+        logger.info(f"Created relationship {relationship_type} between {start_node_id} and {end_node_id}")
+
+    async def get_node(self, label: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+        query = f"""
+        MATCH (n:{label} {{name: $name}})
+        RETURN n
+        """
+        result = await self.execute_query(query, {"name": properties.get('name')})
+        return result[0]['n'] if result else None
+
+    async def get_all_nodes(self, label: str) -> List[Dict[str, Any]]:
+        query = f"""
+        MATCH (n:{label})
+        RETURN n
+        """
+        result = await self.execute_query(query)
+        return [record['n'] for record in result]
+
+    async def add_task_result(self, task: str, result: str):
         task_node = {
             "id": str(uuid.uuid4()),
             "content": task,
             "result": result,
-            "score": score,
             "timestamp": time.time()
         }
-        task_result = await self.add_or_update_node("TaskResult", task_node)
-        await self.add_relationships_to_concepts(task_result['id'], task)
-        return task_result
+        await self.add_or_update_node("TaskResult", task_node)
+        logger.info(f"Added task result for task: {task[:100]}...")
 
     async def add_improvement_suggestion(self, improvement: str):
+        improvement_id = str(uuid.uuid4())
         improvement_node = {
-            "id": str(uuid.uuid4()),
+            "id": improvement_id,
             "content": improvement[:1000],
             "timestamp": time.time()
         }
         await self.add_or_update_node("Improvement", improvement_node)
+        logger.info(f"Added improvement suggestion: {improvement[:100]}...")
 
-    async def store_tool_usage(self, tool_name: str, subtask: dict, result: dict):
+    async def get_system_performance(self) -> Dict[str, Any]:
+        try:
+            query = """
+            MATCH (p:Performance)
+            WHERE p.timestamp > $timestamp
+            RETURN p.metric AS metric, AVG(p.value) AS avg_value
+            """
+            timestamp = time.time() - 86400  # Get performance data from the last 24 hours
+            result = await self.execute_query(query, {"timestamp": timestamp})
+            
+            performance_data = {}
+            for record in result:
+                performance_data[record["metric"]] = record["avg_value"]
+            
+            return performance_data
+        except Exception as e:
+            logger.error(f"Error getting system performance: {str(e)}", exc_info=True)
+            return {}
+
+    async def store_performance_metric(self, metric: str, value: float):
+        try:
+            query = """
+            CREATE (p:Performance {metric: $metric, value: $value, timestamp: $timestamp})
+            """
+            await self.execute_query(query, {"metric": metric, "value": value, "timestamp": time.time()})
+            logger.info(f"Stored performance metric: {metric} = {value}")
+        except Exception as e:
+            logger.error(f"Error storing performance metric: {str(e)}", exc_info=True)
+
+    async def get_all_knowledge(self) -> List[Dict[str, Any]]:
+        query = """
+        MATCH (n)
+        RETURN n
+        """
+        result = await self.execute_query(query)
+        return [record['n'] for record in result]
+
+    async def store_tool_usage(self, tool_name: str, subtask: Dict[str, Any], result: Dict[str, Any]):
         tool_usage = {
             "id": str(uuid.uuid4()),
             "tool_name": tool_name,
@@ -62,6 +215,16 @@ class KnowledgeGraph(BaseKnowledgeGraph):
         }
         await self.add_or_update_node("ToolUsage", tool_usage)
 
+    async def get_tool_usage_history(self, tool_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        query = """
+        MATCH (t:ToolUsage {tool_name: $tool_name})
+        RETURN t
+        ORDER BY t.timestamp DESC
+        LIMIT $limit
+        """
+        result = await self.execute_query(query, {"tool_name": tool_name, "limit": limit})
+        return [record['t'] for record in result]
+
     async def store_tool(self, tool_name: str, source_code: str):
         tool_node = {
             "id": str(uuid.uuid4()),
@@ -70,6 +233,32 @@ class KnowledgeGraph(BaseKnowledgeGraph):
             "created_at": time.time()
         }
         await self.add_or_update_node("Tool", tool_node)
+        logger.info(f"Stored tool in knowledge graph: {tool_name}")
+
+    async def get_tool(self, tool_name: str) -> Dict[str, Any]:
+        query = """
+        MATCH (t:Tool {name: $tool_name})
+        RETURN t
+        """
+        result = await self.execute_query(query, {"tool_name": tool_name})
+        return result[0]['t'] if result else None
+
+    async def get_all_tools(self) -> List[Dict[str, Any]]:
+        query = """
+        MATCH (t:Tool)
+        RETURN t
+        """
+        result = await self.execute_query(query)
+        return [record['t'] for record in result]
+
+    async def get_relevant_knowledge(self, content: str) -> List[Dict[str, Any]]:
+        query = """
+        MATCH (n)
+        WHERE n.content CONTAINS $content
+        RETURN n
+        """
+        result = await self.execute_query(query, {"content": content})
+        return [record['n'] for record in result]
 
     async def store_compressed_knowledge(self, compressed_knowledge: str):
         compressed_node = {
@@ -78,197 +267,30 @@ class KnowledgeGraph(BaseKnowledgeGraph):
             "timestamp": time.time()
         }
         await self.add_or_update_node("CompressedKnowledge", compressed_node)
+        logger.info(f"Stored compressed knowledge: {compressed_knowledge[:100]}...")
 
-    async def add_relationships_to_concepts(self, task_id: str, task_content: str):
-        concepts = await self.entropy_manager.extract_concepts(task_content)  # Use EntropyManager for concept extraction
-        for concept in concepts:
-            concept_node = await self.add_or_update_node("Concept", {"name": concept})
-            await self.add_relationship(task_id, concept_node['id'], "RELATES_TO")
-
-    async def get_relevant_knowledge(self, content: str):
-        query = """
-        MATCH (n)
-        WHERE n.content CONTAINS $content OR n.name CONTAINS $content
-        RETURN n
-        LIMIT 5
-        """
-        result = await self.query_executor.execute_query(query, {"content": content})
-        return [record['n'] for record in result]
-
-    async def get_system_performance(self):
-        query = """
-        MATCH (p:Performance)
-        WHERE p.timestamp > $timestamp
-        RETURN p.metric AS metric, AVG(p.value) AS avg_value
-        """
-        timestamp = time.time() - 86400  # Get performance data from the last 24 hours
-        result = await self.query_executor.execute_query(query, {"timestamp": timestamp})
-        return {record["metric"]: record["avg_value"] for record in result}
-
-    async def store_performance_metric(self, metric: str, value: float):
-        performance_node = {
-            "id": str(uuid.uuid4()),
-            "metric": metric,
-            "value": value,
-            "timestamp": time.time()
-        }
-        await self.add_or_update_node("Performance", performance_node)
-
-    async def get_tool_usage_history(self, tool_name: str, limit: int = 10):
-        query = """
-        MATCH (t:ToolUsage {tool_name: $tool_name})
-        RETURN t
-        ORDER BY t.timestamp DESC
-        LIMIT $limit
-        """
-        result = await self.query_executor.execute_query(query, {"tool_name": tool_name, "limit": limit})
-        return [record['t'] for record in result]
-
-    async def export_knowledge(self, file_path: str):
-        await self.knowledge_import_export.export_knowledge(file_path)
-
-    async def import_knowledge(self, file_path: str):
-        await self.knowledge_import_export.import_knowledge(file_path)
-
-    async def export_knowledge_framework(self, file_path: str):
-        await self.knowledge_import_export.export_knowledge_framework(file_path)
-
-    async def import_knowledge_framework(self, file_path: str):
-        await self.knowledge_import_export.import_knowledge_framework(file_path)
-
-    async def bootstrap_agent(self, framework_file: str, knowledge_file: str):
-        await self.import_knowledge_framework(framework_file)
-        await self.import_knowledge(knowledge_file)
-
-    async def store_episode(self, task_context: Dict[str, Any]):
-        episode_node = {
-            "id": str(uuid.uuid4()),
-            "task": task_context.get("original_task"),
-            "context": json.dumps(task_context),
-            "timestamp": time.time()
-        }
-        await self.add_or_update_node("Episode", episode_node)
-        await self.add_relationships_to_concepts(episode_node['id'], task_context.get("original_task"))
-
-    async def recall_relevant_episodes(self, current_context: Dict[str, Any], limit: int = 5):
-        query = """
-        MATCH (e:Episode)
-        WHERE e.task CONTAINS $task
-        RETURN e
-        ORDER BY e.timestamp DESC
-        LIMIT $limit
-        """
-        try:
-            result = await self.query_executor.execute_query(query, {
-                "task": current_context.get("original_task"),
-                "limit": limit
-            })
-            return [record['e'] for record in result]
-        except Exception as e:
-            self.logging_manager.log_warning(f"Failed to recall relevant episodes: {str(e)}")
-            return []
-
-    async def consolidate_memory(self, recent_tasks: List[Dict[str, Any]]):
-        consolidated_knowledge = await self.entropy_manager.consolidate_knowledge(recent_tasks)
-        await self.add_or_update_node("ConsolidatedKnowledge", {
-            "content": json.dumps(consolidated_knowledge),
-            "timestamp": time.time()
-        })
+    async def get_similar_nodes(self, query: str, label: str = None, k: int = 5, use_faiss: bool = False):
+        query_embedding = self.embedding_manager.encode(query)
         
-        # Extract concepts from consolidated knowledge and create relationships
-        for task in recent_tasks:
-            await self.add_relationships_to_concepts(consolidated_knowledge['id'], task.get("task"))
-
-    async def store_meta_learning_weights(self, weights: Dict[str, float]):
-        weights_node = {
-            "id": str(uuid.uuid4()),
-            "weights": json.dumps(weights),
-            "timestamp": time.time()
-        }
-        await self.add_or_update_node("MetaLearningWeights", weights_node)
-
-    async def get_recent_improvement_suggestions(self, limit: int = 50) -> List[str]:
-        query = """
-        MATCH (i:Improvement)
-        RETURN i.content AS suggestion
-        ORDER BY i.timestamp DESC
-        LIMIT $limit
-        """
-        result = await self.query_executor.execute_query(query, {"limit": limit})
-        return [record['suggestion'] for record in result]
-
-    async def store_improvement_analysis(self, analysis: Dict[str, Any]):
-        analysis_node = {
-            "id": str(uuid.uuid4()),
-            "common_themes": json.dumps(analysis.get("common_themes", [])),
-            "priority_improvements": json.dumps(analysis.get("priority_improvements", [])),
-            "long_term_strategies": json.dumps(analysis.get("long_term_strategies", [])),
-            "timestamp": time.time()
-        }
-        await self.add_or_update_node("ImprovementAnalysis", analysis_node)
-
-    async def get_latest_meta_learning_insights(self) -> Dict[str, Any]:
-        query = """
-        MATCH (w:MetaLearningWeights)
-        WITH w ORDER BY w.timestamp DESC LIMIT 1
-        MATCH (a:ImprovementAnalysis)
-        WITH w, a ORDER BY a.timestamp DESC LIMIT 1
-        RETURN w.weights AS weights, a.common_themes AS common_themes,
-               a.priority_improvements AS priority_improvements,
-               a.long_term_strategies AS long_term_strategies
-        """
-        result = await self.query_executor.execute_query(query)
-        if result:
-            return {
-                "weights": json.loads(result[0]['weights']),
-                "common_themes": json.loads(result[0]['common_themes']),
-                "priority_improvements": json.loads(result[0]['priority_improvements']),
-                "long_term_strategies": json.loads(result[0]['long_term_strategies'])
-            }
-        return {}
-
-    async def get_old_memories(self, threshold_days: int) -> List[Dict[str, Any]]:
-        threshold_timestamp = time.time() - (threshold_days * 24 * 60 * 60)
-        query = """
-        MATCH (n:Memory)
-        WHERE n.timestamp < $threshold
+        # Fetch all nodes with embeddings
+        cypher_query = f"""
+        MATCH (n{':' + label if label else ''})
+        WHERE EXISTS(n.embedding)
         RETURN n
         """
-        result = await self.query_executor.execute_query(query, {"threshold": threshold_timestamp})
-        return [record['n'] for record in result]
-
-    async def store_compressed_memory(self, compressed_memory: Dict[str, Any]):
-        compressed_data = await self.entropy_manager.compress_memories(compressed_memory)
-        await self.add_or_update_node("CompressedMemory", {
-            "content": json.dumps(compressed_data),
-            "timestamp": time.time()
-        })
-
-    async def consolidate_knowledge(self):
-        recent_nodes = await self.get_recent_nodes(limit=1000)
-        consolidated_knowledge = await self.entropy_manager.consolidate_knowledge(recent_nodes)
-        await self.add_or_update_node("ConsolidatedKnowledge", {
-            "content": json.dumps(consolidated_knowledge),
-            "timestamp": time.time()
-        })
-
-    async def store_meta_learning_insights(self, insights: List[Dict[str, Any]]):
-        for insight in insights:
-            await self.add_or_update_node("MetaLearningInsight", {
-                "content": json.dumps(insight),
-                "timestamp": time.time()
-            })
-
-    async def export_knowledge_subset(self, node_types: List[str], file_path: str):
-        await self.knowledge_import_export.export_knowledge_subset(node_types, file_path)
-
-    async def import_knowledge_subset(self, file_path: str, merge_strategy: str = 'update'):
-        await self.knowledge_import_export.import_knowledge_subset(file_path, merge_strategy)
-
-    async def compare_knowledge_graphs(self, other_graph_file: str) -> Dict[str, Any]:
-        return await self.knowledge_import_export.compare_knowledge_graphs(other_graph_file)
-
-    async def merge_knowledge_graphs(self, other_graph_file: str, merge_strategy: str = 'update'):
-        await self.knowledge_import_export.merge_knowledge_graphs(other_graph_file, merge_strategy)
-
-    # Add other methods as needed, delegating to the appropriate manager classes
+        result = await self.execute_query(cypher_query)
+        
+        # Extract embeddings and node data
+        nodes = [record['n'] for record in result]
+        embeddings = [np.array(node['embedding']) for node in nodes]
+        
+        if use_faiss:
+            self.embedding_manager.build_faiss_index(embeddings)
+            distances, indices = self.embedding_manager.faiss_search(query_embedding, k)
+            return [(nodes[i], 1 - d) for i, d in zip(indices[0], distances[0])]
+        else:
+            # Find most similar nodes
+            similar_indices = self.embedding_manager.find_most_similar(query_embedding, embeddings, k)
+            
+            # Return similar nodes with their similarity scores
+            return [(nodes[i], score) for i, score in similar_indices]

@@ -16,6 +16,8 @@ class ChatGPT:
 
     @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def chat_with_ollama(self, system_prompt: str, user_prompt: str) -> str:
+        max_tokens = 20000  # Adjust based on your model's actual limit
+        chunked_user_prompt = await self.chunk_and_summarize(user_prompt, max_tokens)
         logger.info(f"Sending request to Ollama with system prompt: {system_prompt} and user_prompt: {user_prompt}", {"component": "ChatGPT", "method": "chat_with_ollama"})
         async with aiohttp.ClientSession() as session:
             try:
@@ -23,7 +25,7 @@ class ChatGPT:
                     f"{self.base_url}/api/generate",
                     json={
                         "model": "hermes3",
-                        "prompt": f"{system_prompt}\n\nUser: {user_prompt}\nAssistant:",
+                        "prompt": f"{system_prompt}\n\nUser: {chunked_user_prompt}\nAssistant:",
                         "stream": False
                     }
                 ) as response:
@@ -42,6 +44,44 @@ class ChatGPT:
             except aiohttp.ClientError as e:
                 logger.error(f"Network error in Ollama API call: {str(e)}", {"component": "ChatGPT", "method": "chat_with_ollama"})
                 raise
+
+    async def chunk_and_summarize(self, text: str, max_tokens: int = 10000, overlap_ratio: float = 0.3) -> str:
+        """
+        Chunk the input text and summarize it when it exceeds the maximum token limit.
+        
+        Args:
+            text (str): The input text to be chunked and summarized.
+            max_tokens (int): The maximum number of tokens allowed before chunking.
+            overlap_ratio (float): The ratio of overlap between chunks.
+        
+        Returns:
+            str: The summarized text.
+        """
+        # Estimate token count (rough estimation, adjust as needed)
+        estimated_tokens = len(text.split())
+        
+        if estimated_tokens <= max_tokens:
+            return text
+        
+        chunk_size = max_tokens
+        overlap_size = int(chunk_size * overlap_ratio)
+        chunks = []
+        
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            chunk = text[start:end]
+            chunks.append(chunk)
+            start = end - overlap_size
+        
+        summarized_chunks = []
+        for chunk in chunks:
+            summary_prompt = f"Summarize the following text, preserving key information:\n\n{chunk}"
+            summary = await self.chat_with_ollama("You are a skilled text summarizer.", summary_prompt)
+            summarized_chunks.append(summary)
+        
+        final_summary = "\n\n".join(summarized_chunks)
+        return final_summary
 
     async def generate(self, prompt: str) -> str:
         logger.info(f"Generating response for prompt: {prompt}", {"component": "ChatGPT", "method": "generate"})
