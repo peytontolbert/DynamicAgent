@@ -7,6 +7,7 @@ from app.knowledge.community_manager import CommunityManager
 import time
 import asyncio
 from app.utils.logger import StructuredLogger
+import uuid
 
 logger = StructuredLogger("EpisodicKnowledge")
 
@@ -26,10 +27,16 @@ class EpisodicKnowledgeSystem:
         self.episode_cache = {}
         self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
 
-    def log_task(self, task_description, result, context=None):
-        task_entry = {"task": task_description, "result": result, "context": context}
-        self.task_history.append(task_entry)
-        self.knowledge_graph.add_or_update_node("TaskHistory", task_entry)
+    async def log_task(self, task: str, result: str, context: str, thoughts: str):
+        task_entry = {
+            "id": str(uuid.uuid4()),
+            "task": task,
+            "result": result,
+            "context": context,
+            "thoughts": thoughts,
+            "timestamp": time.time()
+        }
+        await self.knowledge_graph.add_or_update_node("TaskHistory", task_entry)
 
     def retrieve_task_history(self):
         return self.task_history

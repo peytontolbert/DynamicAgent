@@ -10,6 +10,7 @@ import uuid
 from tenacity import retry, stop_after_attempt, wait_exponential
 from sentence_transformers import SentenceTransformer
 from app.knowledge.embedding_manager import EmbeddingManager
+from neo4j.exceptions import AuthError
 
 load_dotenv()
 
@@ -17,8 +18,20 @@ logger = StructuredLogger("KnowledgeGraph")
 
 class KnowledgeGraph:
     def __init__(self, uri, user, password):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))  # Correctly initialize the driver
-        self.is_async = asyncio.iscoroutinefunction(self.driver.session)
+        try:
+            self.driver = GraphDatabase.driver(uri, auth=(user, password))
+            self.driver.verify_connectivity()
+            logger.info("Successfully connected to Neo4j database")
+            self.is_async = asyncio.iscoroutinefunction(self.driver.session)
+        except AuthError:
+            logger.error("Failed to authenticate with Neo4j. Please check your credentials.")
+            self.driver = None
+            self.is_async = False
+        except Exception as e:
+            logger.error(f"Failed to connect to Neo4j database: {str(e)}")
+            self.driver = None
+            self.is_async = False
+
         self.embeddings = {}
         self.temporal_data = {}
         self.nodes = {}
@@ -50,6 +63,10 @@ class KnowledgeGraph:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def execute_query(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        if not self.driver:
+            logger.error("No active connection to Neo4j. Unable to execute query.")
+            return []
+        
         try:
             if self.is_async:
                 async with self.driver.session() as session:

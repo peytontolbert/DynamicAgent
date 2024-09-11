@@ -5,6 +5,7 @@ from app.knowledge.embedding_manager import EmbeddingManager
 from app.knowledge.community_manager import CommunityManager
 from typing import List, Dict, Any
 import networkx as nx
+import re
 
 class ProceduralKnowledgeSystem:
     def __init__(self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager):
@@ -94,3 +95,41 @@ class ProceduralKnowledgeSystem:
     async def initialize(self):
         await self.rebuild_tool_graph()
         await self.community_manager.initialize()
+
+    async def enhance_procedural_knowledge(self, task: str, result: str, context: str, thoughts: str):
+        prompt = f"""
+        Analyze the following task, result, context, and thoughts to enhance procedural knowledge:
+        Task: {task}
+        Result: {result}
+        Context: {context}
+        Thoughts: {thoughts}
+
+        Provide insights on:
+        1. What tools or techniques were effective?
+        2. What could be improved in the approach?
+        3. Are there any patterns or strategies that could be applied to similar tasks?
+
+        Format your response as:
+        Insights: <Your analysis>
+        Tool Usage: <Specific tool or technique recommendations>
+        """
+
+        # ... rest of the method ...
+
+    def extract_insights_and_tool_usage(self, response: str) -> (str, Dict[str, str]):
+        insights = ""
+        tool_usage = {}
+        
+        insights_match = re.search(r'Insights:(.*?)Tool Usage:', response, re.DOTALL)
+        if insights_match:
+            insights = insights_match.group(1).strip()
+        
+        tool_usage_match = re.search(r'Tool Usage:(.*)', response, re.DOTALL)
+        if tool_usage_match:
+            tool_usage_text = tool_usage_match.group(1).strip()
+            for line in tool_usage_text.split('\n'):
+                if ':' in line:
+                    tool, usage = line.split(':', 1)
+                    tool_usage[tool.strip()] = usage.strip()
+        
+        return insights, tool_usage

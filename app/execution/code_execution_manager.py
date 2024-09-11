@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict, Any, Callable
 from app.chat_with_ollama import ChatGPT
+import os
 
 class CodeExecutionManager:
     def __init__(self, llm: ChatGPT):
@@ -58,8 +59,22 @@ class CodeExecutionManager:
 
     async def execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
         code = params.get("code", "")
+        venv_path = os.path.join(os.getcwd(), "virtual_env")
+        python_executable = os.path.join(venv_path, "bin", "python")
+
         try:
-            exec(code, globals())
-            return {"status": "success", "result": "Execution result"}
+            process = await asyncio.create_subprocess_exec(
+                python_executable,
+                "-c",
+                code,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                return {"status": "success", "result": stdout.decode()}
+            else:
+                return {"status": "error", "error": stderr.decode()}
         except Exception as e:
             return {"status": "error", "error": str(e)}

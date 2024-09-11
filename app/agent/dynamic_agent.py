@@ -3,7 +3,7 @@ import os
 import uuid
 import json
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 from app.logging.logging_manager import LoggingManager
 from app.chat_with_ollama import ChatGPT
 from app.execution.code_execution_manager import CodeExecutionManager
@@ -67,75 +67,110 @@ class DynamicAgent:
         self.logging_manager.log_info(welcome_message)
 
     async def process_task(self, task: str):
-        # Log task in episodic memory with context
         context = await self.contextual_knowledge.get_context(task)
-        self.episodic_memory.log_task(task, "Processing", context)
+        await self.episodic_memory.log_task(task, "Processing", context)
         
-        # Loop until the user confirms task completion
         while True:
-            context = await self.contextual_knowledge.get_context(task)
-            # Decide action based on the task
-            action = await self.decide_action(task)
+            knowledge = await self.gather_knowledge(task)
+            thoughts = await self.meta_cognitive.generate_thoughts(task, context, knowledge)
+            
+            action, action_thoughts = await self.decide_action(task, thoughts)
+            
             if action == "respond":
-                result = await self.respond(task)
+                result = await self.respond(task, thoughts)
             elif action == "code_execute":
-                result = await self.code_execute(task)
+                result = await self.code_execute(task, thoughts)
             else:
                 result = "Error: Unknown action."
-            await self.update_knowledge(task, result, action, context)
 
-            # Break the loop if the task is complete
+            await self.update_knowledge_step(task, result, action, context, thoughts)
+
             if action == "respond" and result.endswith("Task completed successfully."):
                 break
 
+        await self.update_knowledge_complete(task, result, action, context, thoughts)
         return result
 
-    async def update_knowledge(self, task: str, result: str, action: str, context: str):
-        self.episodic_memory.log_task(task, result, context)
-        self.meta_cognitive.log_performance(task, {"result": result, "action": action})
-        await self.procedural_memory.enhance_procedural_knowledge(task, result)
+    async def update_knowledge_step(self, task: str, result: str, action: str, context: str, thoughts: str):
+        await self.episodic_memory.log_task(task, result, context)
+        await self.meta_cognitive.log_performance(task, {"result": result, "action": action})
         
-        # Extract concepts and generalize knowledge
+        if action == "code_execute":
+            insights, tool_usage = await self.procedural_memory.enhance_procedural_knowledge(task, result, context)
+            self.logging_manager.log_info(f"Procedural Knowledge Insights: {insights}")
+            self.logging_manager.log_info(f"Tool Usage Recommendations: {tool_usage}")
+        
+        # Extract concepts for this step
+        concepts = await self.meta_cognitive.extract_concepts(task)
+        
+        self.logging_manager.log_info(f"Step Extracted Concepts: {concepts}")
+        self.task_history.append({
+            "task": task,
+            "result": result,
+            "concepts": concepts,
+            "context": context,
+            "action": action,
+            "thoughts": thoughts,
+            "procedural_insights": insights if action == "code_execute" else None,
+            "tool_usage": tool_usage if action == "code_execute" else None
+        })
+
+    async def update_knowledge_complete(self, task: str, result: str, action: str, context: str, thoughts: str):
+        # Extract concepts and generalize knowledge for the complete task
         concepts = await self.meta_cognitive.extract_concepts(task)
         generalized_knowledge = await self.meta_cognitive.generalize_knowledge(concepts)
         
-        self.logging_manager.log_info(f"Extracted Concepts: {concepts}")
-        self.logging_manager.log_info(f"Generalized Knowledge: {generalized_knowledge}")
-        self.task_history.append({"task": task, "result": result, "concepts": concepts, "generalized_knowledge": generalized_knowledge, "context": context})
+        self.logging_manager.log_info(f"Task Completed - Extracted Concepts: {concepts}")
+        self.logging_manager.log_info(f"Task Completed - Generalized Knowledge: {generalized_knowledge}")
+        
+        # Update the final task history entry with the generalized knowledge
+        if self.task_history:
+            self.task_history[-1]["generalized_knowledge"] = generalized_knowledge
 
-    async def decide_action(self, task: str) -> str:
+        # Additional updates for task completion
+        await self.conceptual_knowledge.update_concept_relations(concepts)
+        await self.contextual_knowledge.update_context(task, context, result)
+        await self.semantic_knowledge.update_language_understanding(task, result)
+        
+        if action == "code_execute":
+            await self.procedural_memory.enhance_tool_usage(task)
+
+    async def decide_action(self, task: str, thoughts: str) -> Tuple[str, str]:
         knowledge = await self.gather_knowledge(task)
         
-        # Log usage of all relevant knowledge systems
-        self.logging_manager.log_info("Using procedural, conceptual, contextual, meta-cognitive, and semantic knowledge for decision-making.")
-        
         prompt = f"""
-        Analyze the following task and decide whether to use the 'respond' or 'code_execute' action:
+        Analyze the following task, thoughts, and knowledge to decide whether to use the 'respond' or 'code_execute' action:
 
-        Task: {knowledge['interpreted_task']}
+        Task: {task}
+        Thoughts: {thoughts}
         
         Knowledge Inputs:
-        Procedural Knowledge: {knowledge['procedural_info']}
-        Related Concepts: {knowledge['related_concepts']}
-        Contextual Environment: {knowledge['context_info']}
-        Past Performance: {knowledge['performance_data']}
-        Generalized Knowledge: {knowledge['generalized_knowledge']}
+        {json.dumps(knowledge, indent=2)}
         
-        Consider the following:
-        1. If the task requires information retrieval/clarification or to confirm task completion, use 'respond'.
-        2. If the task involves data manipulation, computation, computer interaction, or web access, use 'code_execute'.
-        
-        Provide your decision as a single word: either 'respond' or 'code_execute'.
+        Provide your decision and additional thoughts in the following format:
+        Decision: <respond or code_execute>
+        Action Thoughts: <Your reasoning for this decision>
         """
-        decision = await self.llm.chat_with_ollama("You are a task analysis expert.", prompt)
-        return decision.strip().lower()
+        response = await self.llm.chat_with_ollama("You are a task analysis and decision-making expert.", prompt)
+        decision, action_thoughts = self.extract_decision_and_thoughts(response)
+        return decision.strip().lower(), action_thoughts.strip()
 
-    async def respond(self, task: str) -> str:
+    def extract_decision_and_thoughts(self, response: str) -> Tuple[str, str]:
+        decision_match = re.search(r'Decision:\s*(respond|code_execute)', response, re.IGNORECASE)
+        thoughts_match = re.search(r'Action Thoughts:(.*)', response, re.DOTALL)
+        
+        decision = decision_match.group(1) if decision_match else ""
+        thoughts = thoughts_match.group(1).strip() if thoughts_match else ""
+        
+        return decision, thoughts
+
+    async def respond(self, task: str, thoughts: str) -> str:
         while True:
             knowledge = await self.gather_knowledge(task)
             
             prompt = f"""
             Task: {task}
+            Thoughts: {thoughts}
             Interpreted understanding: {knowledge['interpreted_task']}
             Related concepts: {knowledge['related_concepts']}
             
@@ -153,7 +188,7 @@ class DynamicAgent:
                 task = task_with_input
 
     async def gather_knowledge(self, task: str) -> dict:
-        procedural_info = self.procedural_memory.retrieve_tool_usage(task)
+        procedural_info = await self.procedural_memory.retrieve_tool_usage(task)
         
         # Retrieve related concepts from conceptual knowledge
         related_concepts = self.conceptual_knowledge.get_related_concepts(task)
@@ -165,7 +200,7 @@ class DynamicAgent:
         performance_data = self.meta_cognitive.get_performance(task)
         
         # Ensure the task is understood using semantic knowledge
-        interpreted_task = self.semantic_knowledge.retrieve_language_meaning(task)
+        interpreted_task = await self.semantic_knowledge.retrieve_language_meaning(task)
         if not interpreted_task:
             interpreted_task = await self.semantic_knowledge.enhance_language_understanding(task)
         
@@ -182,14 +217,15 @@ class DynamicAgent:
             "generalized_knowledge": generalized_knowledge
         }
 
-    async def code_execute(self, task: str) -> str:
+    async def code_execute(self, task: str, thoughts: str) -> str:
         workspace_dir = self.virtual_env.base_path
         
         # Use procedural knowledge to guide code generation
-        tool_usage = self.procedural_memory.retrieve_tool_usage(task)
+        tool_usage = await self.procedural_memory.retrieve_tool_usage(task)
+        context = await self.contextual_knowledge.get_context(task)
         
-        thoughts = await self.generate_thoughts(task, workspace_dir, tool_usage)
-        code, language = await self.generate_code(task, workspace_dir, thoughts, tool_usage)
+        thoughts = await self.generate_thoughts(task, workspace_dir, tool_usage, context, thoughts)
+        code, language = await self.generate_code(task, workspace_dir, thoughts, tool_usage, context)
         
         if not code:
             return "Error: Failed to generate valid code."
@@ -203,6 +239,7 @@ class DynamicAgent:
         result = await self.code_execution_manager.execute_and_monitor(formatted_code, self.execution_callback, language, cwd=workspace_dir)
         if result['status'] == 'success':
             await self.knowledge_graph.add_task_result(task, result['result'])
+            await self.procedural_memory.log_tool_usage(language, formatted_code)
             return f"Thoughts: {thoughts}\n\nResult: {result['result']}\n\nTask completed successfully."
         else:
             error_analysis = await self.analyze_error(result['error'], formatted_code)
@@ -221,24 +258,33 @@ class DynamicAgent:
         analysis = await self.llm.chat_with_ollama("You are an expert Python programmer.", prompt)
         return analysis.strip()
 
-    async def generate_thoughts(self, task: str, workspace_dir: str) -> str:
+    async def generate_thoughts(self, task: str, workspace_dir: str, tool_usage: List[str], context: str, thoughts: str) -> str:
         thoughts_prompt = f"""
-        Analyze the following task and provide your thoughts on how to approach it:
+        Analyze the following task, thoughts, and context to provide additional thoughts on how to approach it:
         Task: {task}
+        Thoughts: {thoughts}
         Workspace directory: {workspace_dir}
+        Context: {context}
         
-        Provide your thoughts in the following format:
-        Thoughts: <Your analysis and approach>
+        Previous tool usage:
+        {tool_usage}
+        
+        Provide your additional thoughts in the following format:
+        Additional Thoughts: <Your analysis and approach>
         """
         thoughts_response = await self.llm.chat_with_ollama("You are an expert Python programmer and task analyzer.", thoughts_prompt)
-        return thoughts_response.split("Thoughts:")[1].strip() if "Thoughts:" in thoughts_response else ""
+        return thoughts_response.split("Additional Thoughts:")[1].strip() if "Additional Thoughts:" in thoughts_response else ""
 
-    async def generate_code(self, task: str, workspace_dir: str, thoughts: str) -> (str, str):
+    async def generate_code(self, task: str, workspace_dir: str, thoughts: str, tool_usage: List[str], context: str) -> (str, str):
         code_prompt = f"""
         Generate code to accomplish the following task within the workspace directory {workspace_dir}:
         Task: {task}
         
         Thoughts: {thoughts}
+        Context: {context}
+        
+        Previous tool usage:
+        {tool_usage}
         
         Provide your response in the following format:
         Language: <python|javascript|bash>
