@@ -7,6 +7,7 @@ import faiss
 import pickle
 import os
 
+
 class EmbeddingManager:
     """
     A class for managing text embeddings, including encoding, caching, similarity search, and dimensionality reduction.
@@ -18,7 +19,9 @@ class EmbeddingManager:
         index (Optional[faiss.IndexFlatIP]): FAISS index for efficient similarity search.
     """
 
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2', cache_dir: str = './embedding_cache'):
+    def __init__(
+        self, model_name: str = "all-MiniLM-L6-v2", cache_dir: str = "./embedding_cache"
+    ):
         """
         Initialize the EmbeddingManager.
 
@@ -35,13 +38,13 @@ class EmbeddingManager:
     def load_cache(self):
         """Load the embedding cache from disk."""
         if os.path.exists(f"{self.cache_dir}/embedding_cache.pkl"):
-            with open(f"{self.cache_dir}/embedding_cache.pkl", 'rb') as f:
+            with open(f"{self.cache_dir}/embedding_cache.pkl", "rb") as f:
                 self.cache = pickle.load(f)
 
     def save_cache(self):
         """Save the embedding cache to disk."""
         os.makedirs(self.cache_dir, exist_ok=True)
-        with open(f"{self.cache_dir}/embedding_cache.pkl", 'wb') as f:
+        with open(f"{self.cache_dir}/embedding_cache.pkl", "wb") as f:
             pickle.dump(self.cache, f)
 
     def encode(self, text: str) -> np.ndarray:
@@ -79,7 +82,9 @@ class EmbeddingManager:
             self.save_cache()
         return np.array([self.cache[text] for text in texts])
 
-    def cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+    def cosine_similarity(
+        self, embedding1: np.ndarray, embedding2: np.ndarray
+    ) -> float:
         """
         Calculate the cosine similarity between two embeddings.
 
@@ -90,9 +95,13 @@ class EmbeddingManager:
         Returns:
             float: The cosine similarity between the two embeddings.
         """
-        return np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
+        return np.dot(embedding1, embedding2) / (
+            np.linalg.norm(embedding1) * np.linalg.norm(embedding2)
+        )
 
-    def euclidean_distance(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+    def euclidean_distance(
+        self, embedding1: np.ndarray, embedding2: np.ndarray
+    ) -> float:
         """
         Calculate the Euclidean distance between two embeddings.
 
@@ -105,7 +114,13 @@ class EmbeddingManager:
         """
         return np.linalg.norm(embedding1 - embedding2)
 
-    def find_most_similar(self, query_embedding: np.ndarray, embeddings: List[np.ndarray], k: int = 5, metric: str = 'cosine') -> List[Tuple[int, float]]:
+    def find_most_similar(
+        self,
+        query_embedding: np.ndarray,
+        embeddings: List[np.ndarray],
+        k: int = 5,
+        metric: str = "cosine",
+    ) -> List[Tuple[int, float]]:
         """
         Find the k most similar embeddings to a query embedding.
 
@@ -118,11 +133,17 @@ class EmbeddingManager:
         Returns:
             List[Tuple[int, float]]: List of tuples containing the index and similarity score of the top k similar embeddings.
         """
-        if metric == 'cosine':
-            similarities = [self.cosine_similarity(query_embedding, emb) for emb in embeddings]
-            top_k = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)[:k]
-        elif metric == 'euclidean':
-            distances = [self.euclidean_distance(query_embedding, emb) for emb in embeddings]
+        if metric == "cosine":
+            similarities = [
+                self.cosine_similarity(query_embedding, emb) for emb in embeddings
+            ]
+            top_k = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)[
+                :k
+            ]
+        elif metric == "euclidean":
+            distances = [
+                self.euclidean_distance(query_embedding, emb) for emb in embeddings
+            ]
             top_k = sorted(enumerate(distances), key=lambda x: x[1])[:k]
         else:
             raise ValueError("Unsupported metric. Use 'cosine' or 'euclidean'.")
@@ -138,7 +159,9 @@ class EmbeddingManager:
         self.index = faiss.IndexFlatIP(len(embeddings[0]))
         self.index.add(np.array(embeddings))
 
-    def faiss_search(self, query_embedding: np.ndarray, k: int = 5) -> Tuple[np.ndarray, np.ndarray]:
+    def faiss_search(
+        self, query_embedding: np.ndarray, k: int = 5
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Perform a similarity search using the FAISS index.
 
@@ -153,7 +176,9 @@ class EmbeddingManager:
             raise ValueError("FAISS index not built. Call build_faiss_index first.")
         return self.index.search(query_embedding.reshape(1, -1), k)
 
-    def reduce_dimensions(self, embeddings: List[np.ndarray], method: str = 'pca', n_components: int = 2) -> np.ndarray:
+    def reduce_dimensions(
+        self, embeddings: List[np.ndarray], method: str = "pca", n_components: int = 2
+    ) -> np.ndarray:
         """
         Reduce the dimensionality of embeddings.
 
@@ -165,10 +190,10 @@ class EmbeddingManager:
         Returns:
             np.ndarray: Array of reduced embeddings.
         """
-        if method == 'pca':
+        if method == "pca":
             pca = PCA(n_components=n_components)
             return pca.fit_transform(embeddings)
-        elif method == 'tsne':
+        elif method == "tsne":
             tsne = TSNE(n_components=n_components)
             return tsne.fit_transform(embeddings)
         else:

@@ -3,11 +3,17 @@ from typing import Dict, Any, Callable
 from app.chat_with_ollama import ChatGPT
 import os
 
+
 class CodeExecutionManager:
     def __init__(self, llm: ChatGPT):
         self.llm = llm
 
-    async def execute_and_monitor(self, code: str, callback: Callable[[Dict[str, Any]], None], language: str = "python") -> Dict[str, Any]:
+    async def execute_and_monitor(
+        self,
+        code: str,
+        callback: Callable[[Dict[str, Any]], None],
+        language: str = "python",
+    ) -> Dict[str, Any]:
         if language == "python":
             execution_task = asyncio.create_task(self.execute({"code": code}))
         elif language == "javascript":
@@ -29,9 +35,11 @@ class CodeExecutionManager:
     async def execute_javascript(self, code: str) -> Dict[str, Any]:
         try:
             process = await asyncio.create_subprocess_exec(
-                'node', '-e', code,
+                "node",
+                "-e",
+                code,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
             if process.returncode == 0:
@@ -68,7 +76,7 @@ class CodeExecutionManager:
                 "-c",
                 code,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
 
