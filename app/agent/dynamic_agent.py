@@ -15,6 +15,13 @@ from app.knowledge.conceptual_knowledge import ConceptualKnowledgeSystem
 from app.knowledge.contextual_knowledge import ContextualKnowledgeSystem
 from app.knowledge.meta_cognitive_knowledge import MetaCognitiveKnowledgeSystem
 from app.knowledge.semantic_knowledge import SemanticKnowledgeSystem
+from app.knowledge.embedding_manager import EmbeddingManager
+
+"""
+Dynamic Agent is a dynamic LLM agent equipped with two primary actions: respond and code_execute. 
+This agent operates within a sophisticated knowledge system that includes Systematic, Episodic, Periodic, Conceptual, Contextual, and Meta-cognitive layers, all integrated with a graph database and retrieval-augmented generation (RAG) technology. The agent is capable of generating and executing Python, JavaScript, and Bash code dynamically, enabling it to perform a wide range of digital actions.
+"""
+
 
 class DynamicAgent:
     def __init__(self, uri, user, password, base_path):
@@ -22,12 +29,13 @@ class DynamicAgent:
         self.logging_manager = LoggingManager()  # Initialize logging manager first
         self.code_execution_manager = CodeExecutionManager(self.llm)
         self.knowledge_graph = KnowledgeGraph(uri, user, password)
-        self.procedural_memory = ProceduralKnowledgeSystem(self.knowledge_graph)
-        self.episodic_memory = EpisodicKnowledgeSystem(self.knowledge_graph)
+        self.embedding_manager = EmbeddingManager()
+        self.procedural_memory = ProceduralKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
+        self.episodic_memory = EpisodicKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
         self.conceptual_knowledge = ConceptualKnowledgeSystem(self.knowledge_graph)
         self.contextual_knowledge = ContextualKnowledgeSystem(self.knowledge_graph)
         self.meta_cognitive = MetaCognitiveKnowledgeSystem(self.knowledge_graph)
-        self.semantic_knowledge = SemanticKnowledgeSystem(self.knowledge_graph)
+        self.semantic_knowledge = SemanticKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
         self.virtual_env = VirtualEnvironment(base_path)
         self.env_id = None
         self.has_memory = False

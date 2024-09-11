@@ -1,16 +1,14 @@
 import asyncio
 from typing import Dict, Any, Callable
-from app.agents.skill import CodeExecuteSkill
 from app.chat_with_ollama import ChatGPT
 
 class CodeExecutionManager:
     def __init__(self, llm: ChatGPT):
-        self.code_execute_skill = CodeExecuteSkill("code_execute", "Executes Python code")
         self.llm = llm
 
     async def execute_and_monitor(self, code: str, callback: Callable[[Dict[str, Any]], None], language: str = "python") -> Dict[str, Any]:
         if language == "python":
-            execution_task = asyncio.create_task(self.code_execute_skill.execute({"code": code}))
+            execution_task = asyncio.create_task(self.execute({"code": code}))
         elif language == "javascript":
             execution_task = asyncio.create_task(self.execute_javascript(code))
         else:
@@ -57,3 +55,11 @@ class CodeExecutionManager:
         Please modify the code to fix the error. Provide only the modified code without explanations.
         """
         return await self.llm.generate(prompt)
+
+    async def execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        code = params.get("code", "")
+        try:
+            exec(code, globals())
+            return {"status": "success", "result": "Execution result"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
