@@ -75,14 +75,46 @@ Key features:
 - Logs and retrieves meanings of phrases
 - Enhances language understanding through analysis
 
+## CausalKnowledgeSystem
+
+The `CausalKnowledgeSystem` manages knowledge about cause-and-effect relationships.
+
+Key features:
+- Logs causal relationships between actions and outcomes
+- Retrieves causes for specific outcomes and vice versa
+- Generates causal chains for given actions
+- Calculates success rates for actions
+
+## CounterfactualKnowledgeSystem
+
+The `CounterfactualKnowledgeSystem` handles hypothetical scenarios and alternative outcomes.
+
+Key features:
+- Logs simulated actions and their predicted outcomes
+- Retrieves relevant simulations for specific tasks
+- Predicts outcomes for new actions based on past simulations
+- Simulates task decomposition and preemptive debugging
+
 ## Integration
 
 All these knowledge systems work together to provide a comprehensive knowledge management solution:
 
 1. The `KnowledgeGraph` serves as the central storage system.
 2. The `EmbeddingManager` provides semantic understanding capabilities.
-3. Specialized systems (Episodic, MetaCognitive, Procedural, Conceptual, Contextual, and Semantic) handle different aspects of knowledge.
+3. Specialized systems (Episodic, MetaCognitive, Procedural, Conceptual, Contextual, Semantic, Causal, and Counterfactual) handle different aspects of knowledge.
 4. Each system interacts with the `KnowledgeGraph` to store and retrieve information.
 5. The `ChatGPT` class is used across systems to generate insights and enhance understanding.
 
 This integrated approach allows for efficient storage, retrieval, and utilization of various types of knowledge, enabling the AGI to learn, reason, and make informed decisions across a wide range of tasks and contexts.
+
+## AgentKnowledgeInterface
+
+The `AgentKnowledgeInterface` class serves as a unified interface for the agent to interact with all knowledge systems.
+
+Key features:
+- Initializes and manages all knowledge systems
+- Provides methods for gathering relevant knowledge for tasks
+- Updates knowledge based on task results and agent actions
+- Facilitates decision-making by integrating information from various knowledge systems
+
+By using the AgentKnowledgeInterface, the agent can efficiently access and update its knowledge across all specialized systems, enabling more informed and context-aware decision-making.

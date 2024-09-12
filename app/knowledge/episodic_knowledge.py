@@ -37,13 +37,14 @@ class EpisodicKnowledgeSystem:
         self.episode_cache = {}
         self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
 
-    async def log_task(self, task: str, result: str, context: str, thoughts: str):
+    async def log_task(self, task: str, result: str, context: str, thoughts: str, action_thoughts: str):
         task_entry = {
             "id": str(uuid.uuid4()),
             "task": task,
             "result": result,
             "context": context,
             "thoughts": thoughts,
+            "action_thoughts": action_thoughts,
             "timestamp": time.time(),
         }
         await self.knowledge_graph.add_or_update_node("TaskHistory", task_entry)
@@ -150,11 +151,34 @@ class EpisodicKnowledgeSystem:
         result = await self.knowledge_graph.execute_query(query, {"n": n})
         return [self._node_to_episode(record["e"]) for record in result]
 
-    async def remember_related_episodes(self, query: str, k: int = 5) -> List[Episode]:
+    async def remember_related_episodes(self, query: str, context: str, k: int = 5) -> List[Dict[str, Any]]:
+        # Combine query and context for a more informed search
+        combined_query = f"{query} {context}"
         similar_nodes = await self.knowledge_graph.get_similar_nodes(
-            query, label="Episode", k=k
+            combined_query, label="Episode", k=k*2  # Retrieve more candidates
         )
-        return [self._node_to_episode(node) for node, _ in similar_nodes]
+        
+        # Re-rank episodes based on relevance to both query and context
+        reranked_episodes = await self._rerank_episodes(similar_nodes, query, context)
+        
+        return reranked_episodes[:k]
+
+    async def _rerank_episodes(self, episodes, query: str, context: str):
+        reranked = []
+        for node, similarity in episodes:
+            episode = self._node_to_episode(node)
+            relevance_score = await self._calculate_relevance(episode, query, context)
+            reranked.append((episode, relevance_score))
+        
+        return sorted(reranked, key=lambda x: x[1], reverse=True)
+
+    async def _calculate_relevance(self, episode: Episode, query: str, context: str):
+        # Implement a more sophisticated relevance calculation
+        # This could involve semantic similarity, temporal relevance, etc.
+        # For now, we'll use a simple combination of query and context similarity
+        query_similarity = self.embedding_manager.calculate_similarity(query, episode.summary)
+        context_similarity = self.embedding_manager.calculate_similarity(context, episode.summary)
+        return (query_similarity + context_similarity) / 2
 
     async def find_related_episodes_and_tasks(self, query: str, k: int = 5):
         similar_episodes = await self.knowledge_graph.get_similar_nodes(
@@ -212,24 +236,90 @@ class EpisodicKnowledgeSystem:
         logger.info("Episodes organized into communities")
 
     async def generate_hierarchical_summary(self):
-        community_summaries = self.community_manager.community_summaries
-        overall_summary = await self._summarize_community(
-            list(community_summaries.values())
-        )
+        community_summaries = await self.community_manager.get_community_summaries()
+        
+        # Generate mid-level summaries for each community
+        mid_level_summaries = await asyncio.gather(*[
+            self._generate_mid_level_summary(community, summary)
+            for community, summary in community_summaries.items()
+        ])
+        
+        # Generate overall summary
+        overall_summary = await self._generate_overall_summary(mid_level_summaries)
+        
         await self.knowledge_graph.add_or_update_node(
-            "OverallSummary", {"id": "overall_summary", "content": overall_summary}
+            "HierarchicalSummary",
+            {
+                "id": "hierarchical_summary",
+                "overall_summary": overall_summary,
+                "community_summaries": json.dumps(mid_level_summaries)
+            }
         )
 
-    async def _summarize_community(self, summaries):
-        combined_summary = " ".join(summaries)
-        prompt = f"Summarize the following community of episodes:\n\n{combined_summary}"
-        summary = await self.llm.chat_with_ollama(
-            "You are a community summarizer.", prompt
+    async def _generate_mid_level_summary(self, community: str, summary: str):
+        prompt = f"Summarize the following community of episodes, highlighting key themes and patterns:\n\n{summary}"
+        mid_level_summary = await self.llm.chat_with_ollama("You are an expert in identifying patterns and themes.", prompt)
+        return {"community": community, "summary": mid_level_summary.strip()}
+
+    async def _generate_overall_summary(self, mid_level_summaries: List[Dict[str, str]]):
+        combined_summaries = "\n\n".join([f"{s['community']}:\n{s['summary']}" for s in mid_level_summaries])
+        prompt = f"Create an overall summary of the agent's episodic knowledge based on these community summaries:\n\n{combined_summaries}"
+        overall_summary = await self.llm.chat_with_ollama("You are an expert in synthesizing high-level knowledge.", prompt)
+        return overall_summary.strip()
+
+    async def query_focused_summary(self, query: str, context: str) -> str:
+        community_summaries = await self.community_manager.query_communities(query)
+        related_episodes = await self.remember_related_episodes(query, context, k=3)
+        
+        prompt = f"""
+        Query: {query}
+        Context: {context}
+        
+        Related Episodes:
+        {self._format_episodes(related_episodes)}
+        
+        Community Knowledge:
+        {community_summaries}
+        
+        Based on the query, context, related episodes, and community knowledge, provide a focused summary that addresses the query.
+        """
+        
+        focused_summary = await self.llm.chat_with_ollama(
+            "You are a knowledge synthesizer with expertise in connecting relevant information.", prompt
         )
-        return summary.strip()
+        return focused_summary.strip()
 
-    async def query_focused_summary(self, query: str):
-        return await self.community_manager.query_communities(query)
+    def _format_episodes(self, episodes):
+        return "\n".join([f"- {episode.summary}" for episode, _ in episodes])
 
-    async def map_reduce_summarization(self, query: str):
-        return await self.community_manager.query_communities(query)
+    async def update_episode_relevance(self, episode_id: str, query: str, was_helpful: bool):
+        episode = self.episode_cache.get(episode_id)
+        if not episode:
+            return
+        
+        current_embedding = self.embedding_manager.encode(episode.summary)
+        query_embedding = self.embedding_manager.encode(query)
+        
+        # Adjust the episode's embedding based on feedback
+        adjusted_embedding = self._adjust_embedding(current_embedding, query_embedding, was_helpful)
+        
+        # Update the episode in the knowledge graph
+        await self.knowledge_graph.update_node_property(episode_id, "embedding", adjusted_embedding.tolist())
+        
+        # Update communities
+        await self.community_manager.update_knowledge({"id": episode_id, "embedding": adjusted_embedding})
+
+    def _adjust_embedding(self, current_embedding, query_embedding, was_helpful):
+        # Simple adjustment: move embedding closer to or further from query embedding
+        adjustment_factor = 0.1 if was_helpful else -0.05
+        return current_embedding + (query_embedding - current_embedding) * adjustment_factor
+
+    async def get_recent_episodes(self, n: int = 5) -> List[Episode]:
+        query = """
+        MATCH (e:Episode)
+        RETURN e
+        ORDER BY e.timestamp DESC
+        LIMIT $n
+        """
+        result = await self.knowledge_graph.execute_query(query, {"n": n})
+        return [self._node_to_episode(record["e"]) for record in result]

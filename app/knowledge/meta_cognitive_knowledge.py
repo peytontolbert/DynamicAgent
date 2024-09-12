@@ -5,7 +5,7 @@ from app.chat_with_ollama import ChatGPT
 from app.knowledge.knowledge_graph import KnowledgeGraph
 from app.knowledge.embedding_manager import EmbeddingManager
 from app.knowledge.community_manager import CommunityManager
-
+from datetime import datetime
 
 class MetaCognitiveKnowledgeSystem:
     def __init__(self, knowledge_graph: KnowledgeGraph):
@@ -24,7 +24,7 @@ class MetaCognitiveKnowledgeSystem:
         self.self_monitoring_data[task_name] = performance_data
         await self.knowledge_graph.add_or_update_node(
             "PerformanceData",
-            {"task_name": task_name, "performance_data": performance_data},
+            {"task_name": task_name, "performance_data": performance_data, "timestamp": time.time()},
         )
         await self.community_manager.update_knowledge(
             {
@@ -124,8 +124,9 @@ class MetaCognitiveKnowledgeSystem:
         Procedural: {knowledge['procedural_info']}
         Conceptual: {knowledge['related_concepts']}
         Contextual: {knowledge['context_info']}
-        Episodic: {knowledge['past_experiences']}
-        Semantic: {knowledge['language_understanding']}
+        Episodic: {knowledge['recent_episodes']}
+        Episodic: {knowledge['related_episodes']}
+        Semantic: {knowledge['interpreted_task']}
         Community Knowledge: {community_knowledge}
         
         Provide your thoughts in the following format:
@@ -135,26 +136,23 @@ class MetaCognitiveKnowledgeSystem:
             "You are an expert in metacognition and task analysis.", prompt
         )
 
-        # Store the generated thoughts
         thought_node = {
-            "label": "Thoughts",
-            "id": f"thought_{int(time.time())}",
-            "task": task,
-            "thoughts": thoughts.strip(),
-            "timestamp": time.time(),
+            "label": "Thought",
+            "properties": {
+                "task": task,
+                "thought": thoughts,
+                "timestamp": datetime.now().isoformat()
+            }
         }
         await self.knowledge_graph.add_or_update_node(**thought_node)
-        await self.community_manager.update_knowledge(thought_node)
 
-        return thoughts.strip()
+        return thoughts
 
     async def get_relevant_community_knowledge(self, query: str) -> str:
-        relevant_communities = await self.community_manager.get_relevant_communities(
-            query
-        )
+        relevant_community_ids = await self.community_manager.get_relevant_communities(query)
         community_knowledge = []
-        for community_id in relevant_communities:
-            summary = await self.community_manager.get_community_summary(community_id)
+        for community_id in relevant_community_ids:
+            summary = self.community_manager.community_summaries.get(community_id, "")
             community_knowledge.append(f"Community {community_id}: {summary}")
         return "\n".join(community_knowledge)
 

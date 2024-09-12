@@ -9,16 +9,19 @@ class ConceptualKnowledgeSystem:
         self.knowledge_graph = knowledge_graph
         self.llm = ChatGPT()
 
-    def add_concept(self, concept, related_concepts):
+    async def add_concept(self, concept, related_concepts):
         if concept not in self.concept_graph:
             self.concept_graph[concept] = []
         self.concept_graph[concept].extend(related_concepts)
-        self.knowledge_graph.add_or_update_node(
+        await self.knowledge_graph.add_or_update_node(
             "ConceptGraph", {"concept": concept, "related_concepts": related_concepts}
         )
 
-    def get_related_concepts(self, concept):
-        return self.concept_graph.get(concept, [])
+    async def get_related_concepts(self, concept):
+        related_concepts = self.concept_graph.get(concept, [])
+        if not related_concepts:
+            related_concepts = await self.enhance_concept(concept)
+        return related_concepts
 
     def export(self, path):
         with open(path, "w") as f:
@@ -41,5 +44,5 @@ class ConceptualKnowledgeSystem:
         related_concepts = await self.llm.chat_with_ollama(
             "You are a concept analysis expert.", prompt
         )
-        self.add_concept(concept, related_concepts.strip().split(","))
+        await self.add_concept(concept, related_concepts.strip().split(","))
         return related_concepts.strip()

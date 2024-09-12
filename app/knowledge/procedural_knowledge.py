@@ -15,8 +15,8 @@ class ProceduralKnowledgeSystem:
         self.tool_usage = {}
         self.knowledge_graph = knowledge_graph
         self.embedding_manager = embedding_manager
-        self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
         self.llm = ChatGPT()
+        self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
         self.tool_graph = nx.Graph()
 
     async def log_tool_usage(self, tool_name: str, usage: str):
@@ -26,7 +26,7 @@ class ProceduralKnowledgeSystem:
 
         # Add to knowledge graph
         node_data = {"tool_name": tool_name, "usage": usage}
-        await self.knowledge_graph.add_or_update_node("ToolUsage", node_data)
+        await self.knowledge_graph.add_or_update_node("ToolUsage", properties=node_data)
 
         # Update tool graph
         self.tool_graph.add_node(tool_name)
@@ -54,7 +54,7 @@ class ProceduralKnowledgeSystem:
             for tool_name, usages in self.tool_usage.items():
                 for usage in usages:
                     await self.knowledge_graph.add_or_update_node(
-                        "ToolUsage", {"tool_name": tool_name, "usage": usage}
+                        "ToolUsage", properties={"tool_name": tool_name, "usage": usage}
                     )
         await self.rebuild_tool_graph()
 
@@ -153,3 +153,38 @@ class ProceduralKnowledgeSystem:
                     tool_usage[tool.strip()] = usage.strip()
 
         return insights, tool_usage
+
+    async def retrieve_relevant_tool_usage(self, task: str) -> Dict[str, List[str]]:
+        relevant_tools = {}
+        task_embedding = self.embedding_manager.encode(task)
+        
+        for tool_name, usages in self.tool_usage.items():
+            tool_embedding = self.embedding_manager.encode(tool_name)
+            similarity = self.embedding_manager.cosine_similarity(task_embedding, tool_embedding)
+            
+            if similarity > 0.5:  # Adjust this threshold as needed
+                relevant_tools[tool_name] = usages
+        
+        return relevant_tools
+
+    async def get_tool_insights(self, task: str) -> str:
+        relevant_tools = await self.retrieve_relevant_tool_usage(task)
+        
+        if not relevant_tools:
+            return "No relevant tools found for this task."
+        
+        prompt = f"""
+        Analyze the following task and relevant tools to provide insights:
+        Task: {task}
+        
+        Relevant Tools:
+        {json.dumps(relevant_tools, indent=2)}
+        
+        Provide insights on:
+        1. Which tools are most appropriate for this task?
+        2. How can these tools be effectively used for this task?
+        3. Are there any potential challenges or considerations when using these tools?
+        """
+        
+        insights = await self.llm.chat_with_ollama("You are a tool usage analysis expert.", prompt)
+        return insights.strip()

@@ -6,6 +6,7 @@ from sklearn.manifold import TSNE
 import faiss
 import pickle
 import os
+import networkx as nx
 
 
 class EmbeddingManager:
@@ -215,4 +216,68 @@ class EmbeddingManager:
     def clear_cache(self):
         """Clear the embedding cache and save the empty cache to disk."""
         self.cache.clear()
+        self.save_cache()
+
+    def encode_graph_node(self, node: Dict[str, Any]) -> np.ndarray:
+        """
+        Encode a knowledge graph node into an embedding.
+
+        Args:
+            node (Dict[str, Any]): The node to encode.
+
+        Returns:
+            np.ndarray: The embedding of the input node.
+        """
+        # Combine relevant node attributes into a single string
+        node_text = f"{node.get('label', '')} {node.get('content', '')}"
+        return self.encode(node_text)
+
+    def encode_graph_edge(self, edge: Dict[str, Any]) -> np.ndarray:
+        """
+        Encode a knowledge graph edge into an embedding.
+
+        Args:
+            edge (Dict[str, Any]): The edge to encode.
+
+        Returns:
+            np.ndarray: The embedding of the input edge.
+        """
+        # Combine relevant edge attributes into a single string
+        edge_text = f"{edge.get('type', '')} {edge.get('properties', '')}"
+        return self.encode(edge_text)
+
+    def get_graph_embeddings(self, graph: nx.Graph) -> Dict[str, np.ndarray]:
+        """
+        Get embeddings for all nodes and edges in a knowledge graph.
+
+        Args:
+            graph (nx.Graph): The knowledge graph.
+
+        Returns:
+            Dict[str, np.ndarray]: A dictionary of node/edge IDs to their embeddings.
+        """
+        embeddings = {}
+        for node, data in graph.nodes(data=True):
+            embeddings[f"node_{node}"] = self.encode_graph_node(data)
+        for u, v, data in graph.edges(data=True):
+            embeddings[f"edge_{u}_{v}"] = self.encode_graph_edge(data)
+        return embeddings
+
+    def update_graph_embeddings(self, graph: nx.Graph, changed_elements: List[str]):
+        """
+        Update embeddings for changed elements in the knowledge graph.
+
+        Args:
+            graph (nx.Graph): The knowledge graph.
+            changed_elements (List[str]): List of changed node/edge IDs.
+        """
+        for element in changed_elements:
+            if element.startswith("node_"):
+                node = element[5:]
+                if node in graph.nodes:
+                    self.cache[element] = self.encode_graph_node(graph.nodes[node])
+            elif element.startswith("edge_"):
+                u, v = element[5:].split("_")
+                if graph.has_edge(u, v):
+                    self.cache[element] = self.encode_graph_edge(graph.edges[u, v])
         self.save_cache()
