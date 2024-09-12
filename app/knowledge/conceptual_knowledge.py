@@ -1,13 +1,29 @@
 import json
 from app.chat_with_ollama import ChatGPT
 from app.knowledge.knowledge_graph import KnowledgeGraph
+from app.knowledge.community_manager import CommunityManager
+from app.knowledge.embedding_manager import EmbeddingManager
+
+"""
+The `ConceptualKnowledgeSystem` manages conceptual knowledge and relationships between concepts.
+
+Key Features:
+- **Concept Storage**: Stores and retrieves related concepts.
+- **Concept Enhancement**: Enhances concept understanding through analysis.
+- **Integration with Knowledge Graph**: Adds and updates nodes in the knowledge graph.
+- **Community Management**: Manages communities of related concepts.
+- **LLM Integration**: Uses a language model for concept analysis and enhancement.
+"""
 
 
 class ConceptualKnowledgeSystem:
-    def __init__(self, knowledge_graph: KnowledgeGraph):
-        self.concept_graph = {}
+    def __init__(
+        self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager
+    ):
         self.knowledge_graph = knowledge_graph
+        self.embedding_manager = embedding_manager
         self.llm = ChatGPT()
+        self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
 
     async def add_concept(self, concept, related_concepts):
         if concept not in self.concept_graph:
@@ -46,3 +62,22 @@ class ConceptualKnowledgeSystem:
         )
         await self.add_concept(concept, related_concepts.strip().split(","))
         return related_concepts.strip()
+
+    async def analyze_concepts(self, concept: str):
+        prompt = f"""
+        Analyze the following concept and provide detailed insights:
+        Concept: {concept}
+
+        Provide insights on:
+        1. What are the related concepts?
+        2. How does this concept relate to other concepts?
+        3. Are there any patterns or relationships that could be applied to similar concepts?
+
+        Format your response as:
+        Insights: <Your analysis>
+        Related Concepts: <Specific related concepts>
+        """
+        analysis = await self.llm.chat_with_ollama(
+            "You are a conceptual analysis expert.", prompt
+        )
+        return analysis.strip()

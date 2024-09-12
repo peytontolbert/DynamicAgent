@@ -6,14 +6,23 @@ from app.knowledge.embedding_manager import EmbeddingManager
 from app.utils.logger import StructuredLogger
 from app.chat_with_ollama import ChatGPT
 
+"""
+This module manages communities within the knowledge graph.
+It builds a graph from knowledge, detects communities, generates summaries, and handles queries by generating partial answers from relevant communities.
+
+Key features:
+- Builds a graph from knowledge data
+- Detects communities using the Louvain algorithm
+- Generates summaries for each community
+- Handles queries by generating partial answers from relevant communities
+"""
+
 logger = StructuredLogger("CommunityManager")
 
 
 class CommunityManager:
     def __init__(
-        self, 
-        knowledge_graph: KnowledgeGraph, 
-        embedding_manager: EmbeddingManager
+        self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager
     ):
         self.knowledge_graph = knowledge_graph
         self.embedding_manager = embedding_manager
@@ -106,9 +115,7 @@ class CommunityManager:
             )
             partial_answers.append(partial_answer)
 
-        final_answer = await self.combine_partial_answers(
-            partial_answers, query
-        )
+        final_answer = await self.combine_partial_answers(partial_answers, query)
 
         logger.info(f"Generated answer for query: {query[:50]}...")
         return final_answer
@@ -138,11 +145,16 @@ class CommunityManager:
         """
 
         # Use the LLM to generate the partial answer
-        partial_answer = await self.llm.chat_with_ollama("You are an AI assistant tasked with generating a partial answer based on the given community content and user query.", prompt)
+        partial_answer = await self.llm.chat_with_ollama(
+            "You are an AI assistant tasked with generating a partial answer based on the given community content and user query.",
+            prompt,
+        )
 
         return partial_answer.strip()
 
-    async def combine_partial_answers(self, partial_answers: List[str], query: str) -> str:
+    async def combine_partial_answers(
+        self, partial_answers: List[str], query: str
+    ) -> str:
         """
         Combine partial answers into a final, coherent answer.
 
@@ -167,7 +179,10 @@ class CommunityManager:
         """
 
         # Use the LLM to generate the combined answer
-        combined_answer = await self.llm.chat_with_ollama(system_prompt="You are an AI assistant tasked with combining and refining partial answers into a coherent answer.", user_prompt=prompt)
+        combined_answer = await self.llm.chat_with_ollama(
+            system_prompt="You are an AI assistant tasked with combining and refining partial answers into a coherent answer.",
+            user_prompt=prompt,
+        )
 
         return combined_answer.strip()
 
@@ -193,7 +208,9 @@ class CommunityManager:
         """
 
         # Use the LLM to generate the summary
-        summary = await self.llm.chat_with_ollama("You are an AI assistant tasked with summarizing community content.", prompt)
+        summary = await self.llm.chat_with_ollama(
+            "You are an AI assistant tasked with summarizing community content.", prompt
+        )
 
         return summary.strip()
 

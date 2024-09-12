@@ -7,24 +7,63 @@ from app.knowledge.embedding_manager import EmbeddingManager
 from app.knowledge.community_manager import CommunityManager
 from datetime import datetime
 
-class MetaCognitiveKnowledgeSystem:
-    def __init__(self, knowledge_graph: KnowledgeGraph):
-        self.self_monitoring_data = {}
-        self.knowledge_graph = knowledge_graph
-        self.llm = ChatGPT()
-        self.embedding_manager = EmbeddingManager()
-        self.community_manager = CommunityManager(
-            knowledge_graph, self.embedding_manager
-        )
+"""
+MetaCognitiveKnowledgeSystem for managing meta-cognitive processes
 
-    async def initialize(self):
-        await self.community_manager.initialize()
+This module handles meta-cognitive processes, including self-monitoring and performance analysis.
+It logs and retrieves performance data, enhances performance through analysis and feedback,
+and generalizes knowledge across different scenarios.
+
+Key features:
+- Logs and retrieves performance data
+- Enhances performance through analysis and feedback
+- Generalizes knowledge across different scenarios
+- Extracts key concepts from tasks
+"""
+
+
+class MetaCognitiveKnowledgeSystem:
+    def __init__(
+        self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager
+    ):
+        self.knowledge_graph = knowledge_graph
+        self.embedding_manager = embedding_manager
+        self.llm = ChatGPT()
+        self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
+
+    async def analyze_performance(
+        self, task: str, result: str, context: str, thoughts: str
+    ):
+        prompt = f"""
+        Analyze the following task, result, context, and thoughts to enhance meta-cognitive knowledge:
+        Task: {task}
+        Result: {result}
+        Context: {context}
+        Thoughts: {thoughts}
+
+        Provide insights on:
+        1. What strategies were effective?
+        2. What could be improved in the approach?
+        3. Are there any patterns or strategies that could be applied to similar tasks?
+
+        Format your response as:
+        Insights: <Your analysis>
+        Strategies: <Specific strategy recommendations>
+        """
+        analysis = await self.llm.chat_with_ollama(
+            "You are a meta-cognitive analysis expert.", prompt
+        )
+        return analysis.strip()
 
     async def log_performance(self, task_name, performance_data):
         self.self_monitoring_data[task_name] = performance_data
         await self.knowledge_graph.add_or_update_node(
             "PerformanceData",
-            {"task_name": task_name, "performance_data": performance_data, "timestamp": time.time()},
+            {
+                "task_name": task_name,
+                "performance_data": performance_data,
+                "timestamp": time.time(),
+            },
         )
         await self.community_manager.update_knowledge(
             {
@@ -141,15 +180,17 @@ class MetaCognitiveKnowledgeSystem:
             "properties": {
                 "task": task,
                 "thought": thoughts,
-                "timestamp": datetime.now().isoformat()
-            }
+                "timestamp": datetime.now().isoformat(),
+            },
         }
         await self.knowledge_graph.add_or_update_node(**thought_node)
 
         return thoughts
 
     async def get_relevant_community_knowledge(self, query: str) -> str:
-        relevant_community_ids = await self.community_manager.get_relevant_communities(query)
+        relevant_community_ids = await self.community_manager.get_relevant_communities(
+            query
+        )
         community_knowledge = []
         for community_id in relevant_community_ids:
             summary = self.community_manager.community_summaries.get(community_id, "")

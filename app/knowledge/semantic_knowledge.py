@@ -7,6 +7,20 @@ from app.utils.logger import StructuredLogger
 from typing import Dict, Any, List, Optional
 import asyncio
 
+"""
+This module handles semantic understanding of language.
+It logs and retrieves meanings of phrases, enhances language understanding through analysis, and links related phrases.
+
+Key features:
+- Semantic Analysis: Analyzes text to enhance semantic knowledge
+- Language Data Logging: Logs phrases and their meanings
+- Meaning Retrieval: Retrieves meanings of phrases from local cache or knowledge graph
+- Language Understanding Enhancement: Enhances language understanding through AI-powered analysis
+- Phrase Linking: Links related phrases based on semantic similarity
+- Integration with Knowledge Graph: Stores and retrieves semantic data from a knowledge graph
+- Community Knowledge Integration: Incorporates community knowledge to enrich semantic understanding
+"""
+
 logger = StructuredLogger("SemanticKnowledge")
 
 
@@ -14,11 +28,29 @@ class SemanticKnowledgeSystem:
     def __init__(
         self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager
     ):
-        self.language_understanding = {}
-        self.llm = ChatGPT()
         self.knowledge_graph = knowledge_graph
         self.embedding_manager = embedding_manager
+        self.llm = ChatGPT()
         self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
+
+    async def analyze_language(self, text: str):
+        prompt = f"""
+        Analyze the following text to enhance semantic knowledge:
+        Text: {text}
+
+        Provide insights on:
+        1. What is the general meaning?
+        2. How does the language structure affect the meaning?
+        3. Are there any patterns or strategies that could be applied to similar texts?
+
+        Format your response as:
+        Insights: <Your analysis>
+        Semantic Understanding: <Specific language-related insights>
+        """
+        analysis = await self.llm.chat_with_ollama(
+            "You are a semantic analysis expert.", prompt
+        )
+        return analysis.strip()
 
     async def log_language_data(self, phrase: str, meaning: str):
         self.language_understanding[phrase] = meaning

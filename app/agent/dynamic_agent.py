@@ -6,6 +6,7 @@ from app.chat_with_ollama import ChatGPT
 from app.logging.logging_manager import LoggingManager
 from app.execution.code_execution_manager import CodeExecutionManager
 from app.agent.agent_knowledge_interface import AgentKnowledgeInterface
+from app.agent.agent_thoughts import AgentThoughts
 from app.virtual_env.virtual_environment import VirtualEnvironment
 import time
 import json
@@ -28,7 +29,10 @@ enabling it to perform a wide range of digital actions.
 class DynamicAgent:
     def __init__(self, uri, user, password, base_path):
         self.llm = ChatGPT()
-        self.agent_knowledge_interface = AgentKnowledgeInterface(uri, user, password, base_path)
+        self.agent_knowledge_interface = AgentKnowledgeInterface(
+            uri, user, password, base_path
+        )
+        self.agent_thoughts = AgentThoughts()
         self.logging_manager = LoggingManager()
         self.code_execution_manager = CodeExecutionManager(self.llm)
         self.virtual_env = VirtualEnvironment(base_path)
@@ -67,47 +71,105 @@ class DynamicAgent:
     async def process_task(self, task: str):
         start_time = time.time()
         self.logging_manager.log_info(f"Processing task: {task}")
-        context = await self.agent_knowledge_interface.contextual_knowledge.get_context(task)
-        self.logging_manager.log_info(f"Retrieved context for task")
-        
+
         self.logging_manager.log_info("Gathering knowledge")
-        knowledge = await self.agent_knowledge_interface.gather_knowledge(task, context)
-        
+        knowledge = await self.agent_knowledge_interface.gather_knowledge(task)
+        print(f"knowledge: {knowledge}")
         self.logging_manager.log_info("Determining task complexity")
         is_complex = await self.determine_task_complexity(task, knowledge)
-        self.logging_manager.log_info(f"Task complexity: {'Complex' if is_complex else 'Simple'}")
-        
+        self.logging_manager.log_info(
+            f"Task complexity: {'Complex' if is_complex else 'Simple'}"
+        )
+        print(f"is_complex: {is_complex}")
+
+        # Initialize episode
+        episode_id = await self.agent_knowledge_interface.start_episode(task)
+
         while True:
             self.logging_manager.log_info("Generating thoughts")
             if is_complex:
-                thoughts = await self.agent_knowledge_interface.generate_thoughts_from_context_and_abstract(task, knowledge['context_info'], knowledge['generalized_knowledge'])
+                thoughts = await self.agent_thoughts.generate_thoughts_from_context_and_abstract(
+                    task, knowledge["context_info"], knowledge["generalized_knowledge"]
+                )
+                print(f"thoughts: {thoughts}")
             else:
-                thoughts = await self.agent_knowledge_interface.generate_thoughts_from_procedural_and_episodic(task, knowledge['recent_episodes'])
-            
+                thoughts = await self.agent_thoughts.generate_thoughts_from_procedural_and_episodic(
+                    task, knowledge["recent_episodes"]
+                )
+                print(f"thoughts: {thoughts}")
+
+            # Incorporate spatial and temporal knowledge into thoughts generation
+            spatial_thoughts = await self.agent_thoughts.generate_thoughts_from_spatial(
+                task, knowledge["spatial_info"]
+            )
+            temporal_thoughts = (
+                await self.agent_thoughts.generate_thoughts_from_temporal(
+                    task, knowledge["temporal_info"]
+                )
+            )
+            thoughts += f"\nSpatial Thoughts: {spatial_thoughts}\nTemporal Thoughts: {temporal_thoughts}"
+
             self.logging_manager.log_info("Deciding action")
-            action, action_thoughts = await self.agent_knowledge_interface.decide_action(task, knowledge, thoughts)
+            action, action_thoughts = (
+                await self.agent_knowledge_interface.decide_action(
+                    task, knowledge, thoughts
+                )
+            )
+            print(f"action: {action}")
+            print(f"action_thoughts: {action_thoughts}")
 
             self.logging_manager.log_info(f"Chosen action: {action}")
-            if action == "respond":
-                result = await self.respond(task, thoughts, action_thoughts)
-            elif action == "code_execute":
-                result = await self.code_execute(task, thoughts, action_thoughts)
-            else:
-                result = "Error: Unknown action."
+            try:
+                if action == "respond":
+                    result = await self.respond(task, thoughts, action_thoughts)
+                elif action == "code_execute":
+                    result = await self.code_execute(task, thoughts, action_thoughts)
+                else:
+                    self.logging_manager.log_error(f"Unknown action: {action}")
+                    result = "Error: Unknown action."
+            except Exception as e:
+                self.logging_manager.log_error(
+                    f"Error executing action {action}: {str(e)}"
+                )
+                result = f"Error: Failed to execute action {action}. {str(e)}"
+
+            self.logging_manager.log_info(f"Action result: {result}")
             self.logging_manager.log_info("Updating knowledge")
-            await self.agent_knowledge_interface.update_knowledge_step(task, result, action, context, thoughts, action_thoughts)
+            await self.agent_knowledge_interface.update_knowledge_step(
+                task, result, action, thoughts, action_thoughts
+            )
+            result_thoughts = (
+                await self.agent_thoughts.generate_thoughts_from_action_result(
+                    task, action_thoughts, result
+                )
+            )
+            # Add thoughts to the task for the next iteration
+            task += f"\n{result_thoughts}"
+
+            # Update episode with the latest step
+            await self.agent_knowledge_interface.update_episode_step(
+                episode_id, task, result, action, thoughts, action_thoughts
+            )
 
             if self._is_task_complete(result):
                 self.logging_manager.log_info("Task completed")
                 break
 
         end_time = time.time()
-        self.logging_manager.log_info(f"Task processing completed in {end_time - start_time:.2f} seconds")
+        self.logging_manager.log_info(
+            f"Task processing completed in {end_time - start_time:.2f} seconds"
+        )
         self.logging_manager.log_info("Updating knowledge for completed task")
-        await self.agent_knowledge_interface.update_knowledge_complete(task, result, action, context, thoughts)
+        await self.agent_knowledge_interface.update_knowledge_complete(task)
+        # Mark episode as complete
+        await self.agent_knowledge_interface.complete_episode(
+            episode_id, task, result, thoughts, action_thoughts
+        )
         return result
 
-    async def determine_task_complexity(self, task: str, knowledge: Dict[str, Any]) -> bool:
+    async def determine_task_complexity(
+        self, task: str, knowledge: Dict[str, Any]
+    ) -> bool:
         prompt = f"""
         Analyze the following task and knowledge to determine if the task is complex or simple:
 
@@ -127,12 +189,16 @@ class DynamicAgent:
         Decision: <complex or simple>
         Reasoning: <Your explanation for this decision>
         """
-        response = await self.llm.chat_with_ollama("You are a task complexity analysis expert.", prompt)
+        response = await self.llm.chat_with_ollama(
+            "You are a task complexity analysis expert.", prompt
+        )
         decision, reasoning = self._extract_complexity_decision(response)
         return decision.strip().lower() == "complex"
 
     def _extract_complexity_decision(self, response: str) -> Tuple[str, str]:
-        decision_match = re.search(r"Decision:\s*(complex|simple)", response, re.IGNORECASE)
+        decision_match = re.search(
+            r"Decision:\s*(complex|simple)", response, re.IGNORECASE
+        )
         reasoning_match = re.search(r"Reasoning:(.*)", response, re.DOTALL)
 
         decision = decision_match.group(1) if decision_match else ""
@@ -142,9 +208,13 @@ class DynamicAgent:
 
     async def respond(self, task: str, thoughts: str, action_thoughts: str) -> str:
         self.logging_manager.log_info("Generating response")
-        response = await self.agent_knowledge_interface.generate_response(task, thoughts, action_thoughts)
+        response = await self.agent_knowledge_interface.generate_response(
+            task, thoughts, action_thoughts
+        )
         self.logging_manager.log_info("Response generated, waiting for user input")
-        user_input = input(f"Please provide additional input for the task: {task} {response}")
+        user_input = input(
+            f"Please provide additional input for the task: {task} {response}"
+        )
         task_with_input = f"{task} {user_input}"
 
         is_complete = input("Is the task complete? (yes/no): ").strip().lower()

@@ -8,6 +8,19 @@ import pickle
 import os
 import networkx as nx
 
+"""
+This module manages text embeddings, including encoding, caching, similarity search, and dimensionality reduction.
+It encodes text into embeddings, caches embeddings for efficient retrieval, performs similarity search, and provides dimensionality reduction.
+
+Key features:
+- Encodes text into embeddings using a pre-trained model
+- Caches embeddings for efficient retrieval
+- Performs similarity search using cosine similarity or Euclidean distance
+- Supports FAISS index for fast similarity search
+- Provides dimensionality reduction using PCA or t-SNE
+- Integrates with knowledge graph for semantic search
+"""
+
 
 class EmbeddingManager:
     """

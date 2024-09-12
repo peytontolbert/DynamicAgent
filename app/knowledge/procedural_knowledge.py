@@ -7,6 +7,20 @@ from typing import List, Dict, Any
 import networkx as nx
 import re
 
+"""
+This module manages knowledge related to tool usage and procedures.
+It logs tool usage, retrieves tool usage data, and enhances tool usage through analysis and insights.
+
+Key features:
+- Logs tool usage data with associated context
+- Retrieves historical tool usage information
+- Enhances tool usage through AI-powered analysis
+- Maintains a graph of tool relationships based on usage similarity
+- Integrates with a knowledge graph for persistent storage
+- Supports community-based knowledge sharing
+- Provides import/export functionality for tool usage data
+"""
+
 
 class ProceduralKnowledgeSystem:
     def __init__(
@@ -114,14 +128,11 @@ class ProceduralKnowledgeSystem:
         await self.rebuild_tool_graph()
         await self.community_manager.initialize()
 
-    async def enhance_procedural_knowledge(
-        self, task: str, result: str, context: str, thoughts: str
-    ):
+    async def enhance_procedural_knowledge(self, task: str, result: str, thoughts: str):
         prompt = f"""
         Analyze the following task, result, context, and thoughts to enhance procedural knowledge:
         Task: {task}
         Result: {result}
-        Context: {context}
         Thoughts: {thoughts}
 
         Provide insights on:
@@ -157,22 +168,24 @@ class ProceduralKnowledgeSystem:
     async def retrieve_relevant_tool_usage(self, task: str) -> Dict[str, List[str]]:
         relevant_tools = {}
         task_embedding = self.embedding_manager.encode(task)
-        
+
         for tool_name, usages in self.tool_usage.items():
             tool_embedding = self.embedding_manager.encode(tool_name)
-            similarity = self.embedding_manager.cosine_similarity(task_embedding, tool_embedding)
-            
+            similarity = self.embedding_manager.cosine_similarity(
+                task_embedding, tool_embedding
+            )
+
             if similarity > 0.5:  # Adjust this threshold as needed
                 relevant_tools[tool_name] = usages
-        
+
         return relevant_tools
 
     async def get_tool_insights(self, task: str) -> str:
         relevant_tools = await self.retrieve_relevant_tool_usage(task)
-        
+
         if not relevant_tools:
             return "No relevant tools found for this task."
-        
+
         prompt = f"""
         Analyze the following task and relevant tools to provide insights:
         Task: {task}
@@ -185,6 +198,8 @@ class ProceduralKnowledgeSystem:
         2. How can these tools be effectively used for this task?
         3. Are there any potential challenges or considerations when using these tools?
         """
-        
-        insights = await self.llm.chat_with_ollama("You are a tool usage analysis expert.", prompt)
+
+        insights = await self.llm.chat_with_ollama(
+            "You are a tool usage analysis expert.", prompt
+        )
         return insights.strip()

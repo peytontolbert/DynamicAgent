@@ -3,16 +3,27 @@ from typing import Dict, Any, List
 from app.utils.logger import StructuredLogger
 from dotenv import load_dotenv
 import asyncio
-import numpy as np
-import time
 import json
 import uuid
 from tenacity import retry, stop_after_attempt, wait_exponential
-from sentence_transformers import SentenceTransformer
-from app.knowledge.embedding_manager import EmbeddingManager
 from neo4j.exceptions import AuthError
+import numpy as np
 
 load_dotenv()
+
+"""
+This module represents the central knowledge storage system using a Neo4j graph database.
+It stores nodes and relationships and integrates with the EmbeddingManager for semantic search.
+
+Key Features:
+- **Connection Management**: Establishes and verifies connections to the Neo4j database.
+- **Asynchronous Operations**: Supports asynchronous execution of database operations.
+- **Node Management**: Adds, updates, and retrieves nodes with properties.
+- **Relationship Management**: Creates relationships between nodes with properties.
+- **Retry Mechanism**: Retries failed operations with exponential backoff.
+- **Semantic Search**: Integrates with EmbeddingManager to perform semantic searches using embeddings.
+- **Logging**: Provides structured logging for all operations.
+"""
 
 logger = StructuredLogger("KnowledgeGraph")
 
@@ -34,21 +45,6 @@ class KnowledgeGraph:
             logger.error(f"Failed to connect to Neo4j database: {str(e)}")
             self.driver = None
             self.is_async = False
-
-        self.embeddings = {}
-        self.temporal_data = {}
-        self.nodes = {}
-        self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-        self.embedding_manager = EmbeddingManager()
-        logger.info(
-            f"Initialized KnowledgeGraph with {'async' if self.is_async else 'sync'} driver"
-        )
-
-    def __getitem__(self, key):
-        return self.nodes.get(key)
-
-    def __setitem__(self, key, value):
-        self.nodes[key] = value
 
     async def connect(self):
         try:
@@ -91,9 +87,7 @@ class KnowledgeGraph:
             logger.error(f"Parameters: {parameters}")
             raise
 
-    async def add_or_update_node(
-        self, label: str, properties: Dict[str, Any], embedding: np.ndarray = None
-    ):
+    async def add_or_update_node(self, label: str, properties: Dict[str, Any]):
         node_id = properties.get("id") or str(uuid.uuid4())
         properties["id"] = node_id
 
@@ -104,12 +98,6 @@ class KnowledgeGraph:
                 and not all(isinstance(item, (str, int, float, bool)) for item in value)
             ):
                 properties[key] = json.dumps(value)
-
-        if embedding is None and "summary" in properties:
-            embedding = self.embedding_manager.encode(properties["summary"])
-
-        if embedding is not None:
-            properties["embedding"] = embedding.tolist()  # Store embedding as a list
 
         # First, try to find an existing node with the same 'name' property
         find_query = f"""
@@ -137,9 +125,6 @@ class KnowledgeGraph:
             """
             await self.execute_query(create_query, {"properties": properties})
             logger.info(f"Created new node with ID: {node_id}")
-
-        self.nodes[node_id] = properties
-        logger.info(f"Added or updated node with ID: {node_id}")
 
     async def add_relationship(
         self,
@@ -191,137 +176,6 @@ class KnowledgeGraph:
         """
         result = await self.execute_query(query)
         return [record["n"] for record in result]
-
-    async def add_task_result(self, task: str, result: str):
-        task_node = {
-            "id": str(uuid.uuid4()),
-            "content": task,
-            "result": result,
-            "timestamp": time.time(),
-        }
-        await self.add_or_update_node("TaskResult", task_node)
-        logger.info(f"Added task result for task: {task[:100]}...")
-
-    async def add_improvement_suggestion(self, improvement: str):
-        improvement_id = str(uuid.uuid4())
-        improvement_node = {
-            "id": improvement_id,
-            "content": improvement[:1000],
-            "timestamp": time.time(),
-        }
-        await self.add_or_update_node("Improvement", improvement_node)
-        logger.info(f"Added improvement suggestion: {improvement[:100]}...")
-
-    async def get_system_performance(self) -> Dict[str, Any]:
-        try:
-            query = """
-            MATCH (p:Performance)
-            WHERE p.timestamp > $timestamp
-            RETURN p.metric AS metric, AVG(p.value) AS avg_value
-            """
-            timestamp = (
-                time.time() - 86400
-            )  # Get performance data from the last 24 hours
-            result = await self.execute_query(query, {"timestamp": timestamp})
-
-            performance_data = {}
-            for record in result:
-                performance_data[record["metric"]] = record["avg_value"]
-
-            return performance_data
-        except Exception as e:
-            logger.error(f"Error getting system performance: {str(e)}", exc_info=True)
-            return {}
-
-    async def store_performance_metric(self, metric: str, value: float):
-        try:
-            query = """
-            CREATE (p:Performance {metric: $metric, value: $value, timestamp: $timestamp})
-            """
-            await self.execute_query(
-                query, {"metric": metric, "value": value, "timestamp": time.time()}
-            )
-            logger.info(f"Stored performance metric: {metric} = {value}")
-        except Exception as e:
-            logger.error(f"Error storing performance metric: {str(e)}", exc_info=True)
-
-    async def get_all_knowledge(self) -> List[Dict[str, Any]]:
-        query = """
-        MATCH (n)
-        RETURN n
-        """
-        result = await self.execute_query(query)
-        return [record["n"] for record in result]
-
-    async def store_tool_usage(
-        self, tool_name: str, subtask: Dict[str, Any], result: Dict[str, Any]
-    ):
-        tool_usage = {
-            "id": str(uuid.uuid4()),
-            "tool_name": tool_name,
-            "subtask": json.dumps(subtask),
-            "result": json.dumps(result),
-            "timestamp": time.time(),
-        }
-        await self.add_or_update_node("ToolUsage", tool_usage)
-
-    async def get_tool_usage_history(
-        self, tool_name: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        query = """
-        MATCH (t:ToolUsage {tool_name: $tool_name})
-        RETURN t
-        ORDER BY t.timestamp DESC
-        LIMIT $limit
-        """
-        result = await self.execute_query(
-            query, {"tool_name": tool_name, "limit": limit}
-        )
-        return [record["t"] for record in result]
-
-    async def store_tool(self, tool_name: str, source_code: str):
-        tool_node = {
-            "id": str(uuid.uuid4()),
-            "name": tool_name,
-            "source_code": source_code,
-            "created_at": time.time(),
-        }
-        await self.add_or_update_node("Tool", tool_node)
-        logger.info(f"Stored tool in knowledge graph: {tool_name}")
-
-    async def get_tool(self, tool_name: str) -> Dict[str, Any]:
-        query = """
-        MATCH (t:Tool {name: $tool_name})
-        RETURN t
-        """
-        result = await self.execute_query(query, {"tool_name": tool_name})
-        return result[0]["t"] if result else None
-
-    async def get_all_tools(self) -> List[Dict[str, Any]]:
-        query = """
-        MATCH (t:Tool)
-        RETURN t
-        """
-        result = await self.execute_query(query)
-        return [record["t"] for record in result]
-
-    async def get_relevant_knowledge(self, content: str) -> List[Dict[str, Any]]:
-        query = """
-        MATCH (n)
-        WHERE n.content CONTAINS $content
-        RETURN n
-        """
-        result = await self.execute_query(query, {"content": content})
-        return [record["n"] for record in result]
-
-    async def store_compressed_knowledge(self, compressed_knowledge: str):
-        compressed_node = {
-            "id": str(uuid.uuid4()),
-            "content": compressed_knowledge,
-            "timestamp": time.time(),
-        }
-        await self.add_or_update_node("CompressedKnowledge", compressed_node)
-        logger.info(f"Stored compressed knowledge: {compressed_knowledge[:100]}...")
 
     async def get_similar_nodes(
         self, query: str, label: str = None, k: int = 5, use_faiss: bool = False

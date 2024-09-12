@@ -8,19 +8,48 @@ from app.knowledge.community_manager import CommunityManager
 
 
 """
-This system provides an understanding of the context in which knowledge should be applied. 
-It’s essential for the AGI to recognize the relevance of certain information or actions based on the current situation.
- """
+This module provides an understanding of the context in which knowledge should be applied.
+It analyzes task-specific context, retrieves and logs context data, and enhances context understanding through analysis.
+
+Key Features:
+- Context Analysis: Analyzes task-specific context to provide situational understanding.
+- Context Retrieval: Retrieves existing context data for given tasks.
+- Context Enhancement: Enhances context understanding through AI-powered analysis.
+- Community Knowledge Integration: Incorporates community knowledge to enrich context.
+- Temporal Context Management: Updates and evolves context over time.
+- Embedding-based Similarity: Uses embeddings for efficient context similarity search.
+- Integration with Knowledge Graph: Stores and retrieves context data from a knowledge graph.
+"""
 
 
 class ContextualKnowledgeSystem:
     def __init__(
-        self, knowledge_graph: KnowledgeGraph, community_manager: CommunityManager
+        self, knowledge_graph: KnowledgeGraph, embedding_manager: EmbeddingManager
     ):
         self.knowledge_graph = knowledge_graph
-        self.community_manager = community_manager
+        self.embedding_manager = embedding_manager
         self.llm = ChatGPT()
-        self.embedding_manager = EmbeddingManager()
+        self.community_manager = CommunityManager(knowledge_graph, embedding_manager)
+
+    async def analyze_context(self, task: str, context: str):
+        prompt = f"""
+        Analyze the following task and context to enhance contextual knowledge:
+        Task: {task}
+        Context: {context}
+
+        Provide insights on:
+        1. What is the situational understanding?
+        2. How does the context affect the task?
+        3. Are there any patterns or strategies that could be applied to similar contexts?
+
+        Format your response as:
+        Insights: <Your analysis>
+        Contextual Understanding: <Specific context-related insights>
+        """
+        analysis = await self.llm.chat_with_ollama(
+            "You are a contextual analysis expert.", prompt
+        )
+        return analysis.strip()
 
     async def get_context(self, task: str):
         # Try to retrieve existing context

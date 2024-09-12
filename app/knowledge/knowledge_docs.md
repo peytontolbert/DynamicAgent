@@ -21,7 +21,6 @@ Key features:
 - Stores nodes and relationships in a graph structure
 - Supports adding, updating, and retrieving nodes and relationships
 - Integrates with the EmbeddingManager for semantic search
-- Stores various types of knowledge, including task results, performance metrics, and tool usage
 
 ## EpisodicKnowledgeSystem
 
@@ -95,26 +94,43 @@ Key features:
 - Predicts outcomes for new actions based on past simulations
 - Simulates task decomposition and preemptive debugging
 
+## SpatialKnowledgeSystem
+
+The `SpatialKnowledgeSystem` manages knowledge related to spatial reasoning and relationships.
+
+Key features:
+- Stores and retrieves spatial data
+- Provides methods for spatial reasoning and analysis
+- Integrates with the `KnowledgeGraph` for spatial data storage
+
+## TemporalKnowledgeSystem
+
+The `TemporalKnowledgeSystem` manages knowledge related to time-based reasoning and temporal relationships.
+
+Key features:
+- Stores and retrieves temporal data
+- Provides methods for temporal reasoning and analysis
+- Integrates with the `KnowledgeGraph` for temporal data storage
+
 ## Integration
 
 All these knowledge systems work together to provide a comprehensive knowledge management solution:
 
 1. The `KnowledgeGraph` serves as the central storage system.
 2. The `EmbeddingManager` provides semantic understanding capabilities.
-3. Specialized systems (Episodic, MetaCognitive, Procedural, Conceptual, Contextual, Semantic, Causal, and Counterfactual) handle different aspects of knowledge.
-4. Each system interacts with the `KnowledgeGraph` to store and retrieve information.
-5. The `ChatGPT` class is used across systems to generate insights and enhance understanding.
+3. Specialized systems (Episodic, MetaCognitive, Procedural, Conceptual, Contextual, Semantic, Causal, Counterfactual, Spatial, Temporal) handle different aspects of knowledge.
+4. The `CommunityManager` builds a graph from the knowledge data, detects communities, generates summaries, and handles queries by generating partial answers from relevant communities.
+5. Each system interacts with the `KnowledgeGraph` to store and retrieve information.
+6. For complex queries, systems can leverage the `CommunityManager` to get summarized and contextually relevant information from specific communities.
+7. The `ChatGPT` class is used across systems to generate insights and enhance understanding.
 
 This integrated approach allows for efficient storage, retrieval, and utilization of various types of knowledge, enabling the AGI to learn, reason, and make informed decisions across a wide range of tasks and contexts.
 
-## AgentKnowledgeInterface
+## Future Refinements
 
-The `AgentKnowledgeInterface` class serves as a unified interface for the agent to interact with all knowledge systems.
+### Future Refinements
 
-Key features:
-- Initializes and manages all knowledge systems
-- Provides methods for gathering relevant knowledge for tasks
-- Updates knowledge based on task results and agent actions
-- Facilitates decision-making by integrating information from various knowledge systems
-
-By using the AgentKnowledgeInterface, the agent can efficiently access and update its knowledge across all specialized systems, enabling more informed and context-aware decision-making.
+2. **Root: Expand Knowledge Capabilities**
+   - **Branch 2: Enhance Existing Systems**
+     - Sub-branch 2.1: Improve episodic memory retrieval algorithms
+     - Sub-branch 2.2: Enhance semantic understanding with advanced NLP techniques
