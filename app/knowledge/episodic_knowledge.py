@@ -198,7 +198,7 @@ class EpisodicKnowledgeSystem:
         return [self._node_to_episode(record["e"]) for record in result]
 
     async def remember_related_episodes(
-        self, query: str, context: str, k: int = 5
+        self, query: str, k: int = 5
     ) -> List[Dict[str, Any]]:
         """
         Retrieve episodes related to a specific query and context.
@@ -208,18 +208,18 @@ class EpisodicKnowledgeSystem:
             combined_query, label="Episode", k=k * 2
         )
 
-        reranked_episodes = await self._rerank_episodes(similar_nodes, query, context)
+        reranked_episodes = await self._rerank_episodes(similar_nodes, query)
 
         return reranked_episodes[:k]
 
-    async def _rerank_episodes(self, episodes, query: str, context: str):
+    async def _rerank_episodes(self, episodes, query: str):
         """
         Re-rank episodes based on their relevance to a query and context.
         """
         reranked = []
         for node, similarity in episodes:
             episode = self._node_to_episode(node)
-            relevance_score = await self._calculate_relevance(episode, query, context)
+            relevance_score = await self._calculate_relevance(episode, query)
             reranked.append((episode, relevance_score))
 
         return sorted(reranked, key=lambda x: x[1], reverse=True)
@@ -362,16 +362,15 @@ class EpisodicKnowledgeSystem:
         )
         return overall_summary.strip()
 
-    async def query_focused_summary(self, query: str, context: str) -> str:
+    async def query_focused_summary(self, query: str) -> str:
         """
         Generate a focused summary based on a query and context.
         """
         community_summaries = await self.community_manager.query_communities(query)
-        related_episodes = await self.remember_related_episodes(query, context, k=3)
+        related_episodes = await self.remember_related_episodes(query, k=3)
 
         prompt = f"""
         Query: {query}
-        Context: {context}
         
         Related Episodes:
         {self._format_episodes(related_episodes)}

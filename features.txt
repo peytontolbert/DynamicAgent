@@ -23,3 +23,5 @@
 - Tool usage tracking: The agent tracks the usage of various tools and updates its knowledge base with insights from these interactions.
 - Performance monitoring: The agent monitors its performance and logs metrics to improve over time.
 - Error analysis and correction: The agent can analyze errors in code execution and suggest fixes to improve task outcomes.
+- Temporal knowledge: The agent manages temporal knowledge, including storing and retrieving temporal data, analyzing temporal relationships, and enhancing temporal reasoning.
+- Spatial knowledge: The agent manages spatial knowledge, including storing and retrieving spatial data, analyzing spatial relationships, and enhancing spatial reasoning.

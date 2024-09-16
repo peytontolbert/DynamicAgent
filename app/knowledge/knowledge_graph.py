@@ -8,7 +8,7 @@ import uuid
 from tenacity import retry, stop_after_attempt, wait_exponential
 from neo4j.exceptions import AuthError
 import numpy as np
-
+from app.knowledge.embedding_manager import EmbeddingManager
 load_dotenv()
 
 """
@@ -33,6 +33,7 @@ class KnowledgeGraph:
         try:
             self.driver = GraphDatabase.driver(uri, auth=(user, password))
             self.driver.verify_connectivity()
+            self.embedding_manager = EmbeddingManager()
             logger.info("Successfully connected to Neo4j database")
             self.is_async = asyncio.iscoroutinefunction(self.driver.session)
         except AuthError:

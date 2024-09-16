@@ -64,9 +64,12 @@ class DynamicAgent:
         1. Respond: Get information or answers using natural language.
         2. Code Execute: Run Python/JavaScript/Bash code to perform tasks.
         
-        Just type your task, and the agent will decide the best action to take.
+        Just type your task, and the agent begin to process the task.
         """
         self.logging_manager.log_info(welcome_message)
+
+
+
 
     async def process_task(self, task: str):
         start_time = time.time()

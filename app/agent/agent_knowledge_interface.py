@@ -26,27 +26,27 @@ class AgentKnowledgeInterface:
         self.episodic_memory = EpisodicKnowledgeSystem(
             self.knowledge_graph, self.embedding_manager
         )
-        self.conceptual_knowledge = ConceptualKnowledgeSystem(self.knowledge_graph)
+        self.conceptual_knowledge = ConceptualKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
         self.community_manager = CommunityManager(
             self.knowledge_graph, self.embedding_manager
         )
         self.contextual_knowledge = ContextualKnowledgeSystem(
-            self.knowledge_graph, self.community_manager
+            self.knowledge_graph, self.embedding_manager
         )
-        self.meta_cognitive = MetaCognitiveKnowledgeSystem(self.knowledge_graph)
+        self.meta_cognitive = MetaCognitiveKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
         self.semantic_knowledge = SemanticKnowledgeSystem(
             self.knowledge_graph, self.embedding_manager
         )
-        self.spatial_knowledge = SpatialKnowledgeSystem(self.knowledge_graph)
-        self.temporal_knowledge = TemporalKnowledgeSystem(self.knowledge_graph)
+        self.spatial_knowledge = SpatialKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
+        self.temporal_knowledge = TemporalKnowledgeSystem(self.knowledge_graph, self.embedding_manager)
         self.agent_thoughts = AgentThoughts()
 
     async def gather_knowledge(self, task: str) -> dict:
-        context = await self.agent_knowledge_interface.contextual_knowledge.get_context(
+        context = await self.contextual_knowledge.get_context(
             task
         )
-        related_episodes = await self.episodic_memory.remember_related_episodes(task)
-        recent_episodes = await self.episodic_memory.remember_recent_episodes(5)
+        related_episodes = await self.episodic_memory.query_focused_summary(task)
+        recent_episodes = await self.episodic_memory.remember_recent_episodes(3)
         interpreted_task = await self.semantic_knowledge.retrieve_language_meaning(task)
         if not interpreted_task:
             interpreted_task = (
