@@ -72,6 +72,20 @@ class DynamicAgent:
 
 
     async def process_task(self, task: str):
+        # TODO: Rework this method to implement a thought loop
+        # The agent should iterate through multiple rounds of thinking
+        # before deciding on and committing to an action
+        
+        # Steps to implement:
+        # 1. Initialize the thought process
+        # 2. Enter a loop where the agent generates and refines thoughts
+        # 3. Evaluate the thoughts to determine if more thinking is needed
+        # 4. Once thoughts are sufficiently developed, decide on an action
+        # 5. Execute the chosen action
+        # 6. Analyze the results and update knowledge
+        # 7. Determine if the task is complete or if more iterations are needed
+
+        # Current implementation below, to be refactored:
         start_time = time.time()
         self.logging_manager.log_info(f"Processing task: {task}")
 
